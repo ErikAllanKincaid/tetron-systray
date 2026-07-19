@@ -12,23 +12,31 @@ v1 skeleton only — status polling, icon color state, and a placeholder menu (Q
 
 **Not yet visually verified** — the service-level plumbing (install, runs, survives, uninstalls cleanly) is live-tested on real Linux hardware (Cinnamon desktop), but nobody has looked at an actual menu bar and confirmed the icon renders. Details in the HOWTO's "Status of this repo" section.
 
-## Building
+## Running it
+
+**Primary path: download a pre-built binary, no Rust toolchain needed.**
+Most people running this don't have (and shouldn't need) `cargo` installed.
 
 ```bash
-cargo build --release
-```
+# Linux x86_64 -- see the releases page for aarch64 / macOS binaries:
+# https://github.com/ErikAllanKincaid/tetron-systray/releases/latest
+curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
+chmod +x tetron-systray
+sudo install tetron-systray /usr/local/bin/tetron-systray
 
-See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for platform-specific system dependencies (Linux needs GTK + an app-indicator library).
-
-## Running it persistently (per-user service)
-
-```bash
-sudo install target/release/tetron-systray /usr/local/bin/tetron-systray   # or anywhere on PATH
 tetron-systray install     # sets up + starts a per-user service, no sudo needed
-tetron-systray uninstall   # stops and removes it
 ```
 
-Same shape as `tetron-webui`'s own per-user service: a `systemd --user` unit on Linux, a launchd **LaunchAgent** on macOS — no root needed, runs inside your login session. **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see `docs/HOWTO_Build_A_Systray.md` for the full story). Verified end to end on real hardware: install creates both enable-symlinks, the service runs without crash-looping, and uninstall removes everything cleanly. macOS LaunchAgent path is written but not yet live-tested.
+Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). Verified end to end on real hardware: install creates both enable-symlinks, the service runs without crash-looping, and `tetron-systray uninstall` removes everything cleanly. macOS LaunchAgent path is written but not yet live-tested.
+
+### Building from source / development
+
+```bash
+cargo build --release   # needs GTK + libxdo + an app-indicator library on Linux first --
+                         # see docs/HOWTO_Build_A_Systray.md's "System dependencies" section
+```
+
+Only needed if you're changing the code, or a pre-built binary isn't published for your platform yet.
 
 ## Architecture
 
