@@ -1,0 +1,45 @@
+[package]
+name = "tetron-systray"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MPL-2.0"
+description = "Menu-bar/systray status + quick actions for tetron, over the daemon IPC socket"
+repository = "https://github.com/ErikAllanKincaid/tetron-systray"
+
+[[bin]]
+name = "tetron-systray"
+path = "src/main.rs"
+
+[dependencies]
+# Floating on tetron's main branch, not a pinned tag -- same reasoning as
+# tetron-webui's own Cargo.toml comment: the real compatibility risk is
+# which *binaries* are running together, and tetron-proto's wire types
+# already use #[serde(default)] consistently for exactly that reason.
+tetron-proto = { git = "https://github.com/ErikAllanKincaid/tetron" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+anyhow = "1"
+# Tray icon + native menu. Re-exports muda for menu construction, so no
+# separate menu crate is needed. Runs with a manual polling event loop
+# (TrayIconEvent::receiver()/MenuEvent::receiver(), both non-blocking
+# try_recv()) -- no winit/tao dependency, matching the "no extra GUI
+# framework" decision already made for dropping the typed-join dialog
+# (see DO-NOT-COMMIT/IDEAS_Systray_V1_FunctionScope.md in the tetron repo).
+tray-icon = "0.19"
+# Clipboard read (join-via-clipboard-detect) and write (copy mesh IP /
+# invite key / member IP).
+arboard = "3"
+# Decodes an invite code (bs58(network_pubkey || secret)) client-side for
+# the clipboard-detect join check, same as tetron-webui's own copy of this
+# logic in its Cargo.toml (src/invite.rs isn't public from the tetron
+# binary crate, so this is reimplemented, not imported).
+bs58 = "0.5"
+
+# Linux-only: tray-icon requires a real gtk event loop pumping on the
+# tray-icon-owning thread to actually render/respond to clicks (see
+# docs/HOWTO.md's "Event loop" section) -- it pulls gtk in transitively for
+# its own backend but doesn't re-export it, so this is needed directly to
+# call gtk::init()/main_iteration_do() ourselves. Version matches what
+# tray-icon's own Linux examples build against.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
