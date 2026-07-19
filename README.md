@@ -8,9 +8,9 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Status: early scaffold
 
-v1 skeleton only — status polling, icon color state, and a placeholder menu (Quit). The real function list (per-network resume/standby, member list with copyable IPs, clipboard-detect join, etc.) is scoped but not yet implemented. **See [`docs/HOWTO.md`](docs/HOWTO.md)** for build instructions, the full crate/dependency rationale, and — importantly — the event-loop research behind the current design (a real gotcha: `tray-icon` needs a genuine platform event loop pumping, not just a bare polling loop; not well documented anywhere as a single copy-pasteable example, so that HOWTO is worth reading before changing the event loop code).
+v1 skeleton only — status polling, icon color state, and a placeholder menu (Quit). The real function list (per-network resume/standby, member list with copyable IPs, clipboard-detect join, etc.) is scoped but not yet implemented. **See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)** for build instructions, the full crate/dependency rationale, and — importantly — the event-loop research behind the current design (a real gotcha: `tray-icon` needs a genuine platform event loop pumping, not just a bare polling loop; not well documented anywhere as a single copy-pasteable example, so that HOWTO is worth reading before changing the event loop code).
 
-**Not yet visually verified** — the service-level plumbing (install, runs, survives, uninstalls cleanly) is live-tested on real Linux hardware (Cinnamon desktop), but nobody has looked at an actual menu bar and confirmed the icon renders. Details in the HOWTO's "Known gaps" section.
+**Not yet visually verified** — the service-level plumbing (install, runs, survives, uninstalls cleanly) is live-tested on real Linux hardware (Cinnamon desktop), but nobody has looked at an actual menu bar and confirmed the icon renders. Details in the HOWTO's "Status of this repo" section.
 
 ## Building
 
@@ -18,7 +18,7 @@ v1 skeleton only — status polling, icon color state, and a placeholder menu (Q
 cargo build --release
 ```
 
-See [`docs/HOWTO.md`](docs/HOWTO.md) for platform-specific system dependencies (Linux needs GTK + an app-indicator library).
+See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for platform-specific system dependencies (Linux needs GTK + an app-indicator library).
 
 ## Running it persistently (per-user service)
 
@@ -28,7 +28,7 @@ tetron-systray install     # sets up + starts a per-user service, no sudo needed
 tetron-systray uninstall   # stops and removes it
 ```
 
-Same shape as `tetron-webui`'s own per-user service: a `systemd --user` unit on Linux, a launchd **LaunchAgent** on macOS — no root needed, runs inside your login session. **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see `docs/HOWTO.md` for the full story). Verified end to end on real hardware: install creates both enable-symlinks, the service runs without crash-looping, and uninstall removes everything cleanly. macOS LaunchAgent path is written but not yet live-tested.
+Same shape as `tetron-webui`'s own per-user service: a `systemd --user` unit on Linux, a launchd **LaunchAgent** on macOS — no root needed, runs inside your login session. **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see `docs/HOWTO_Build_A_Systray.md` for the full story). Verified end to end on real hardware: install creates both enable-symlinks, the service runs without crash-looping, and uninstall removes everything cleanly. macOS LaunchAgent path is written but not yet live-tested.
 
 ## Architecture
 
