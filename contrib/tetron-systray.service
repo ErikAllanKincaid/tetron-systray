@@ -1,0 +1,25 @@
+[Unit]
+Description=tetron-systray menu-bar client
+# Needs a graphical session (tray icon, gtk event loop). graphical-session.target
+# is the semantically correct dependency -- GNOME and KDE Plasma both wire it
+# up properly via their own session managers, so it fires at exactly the
+# right moment. But it's not universal: found live (2026-07-19, a real
+# desktop machine running Cinnamon) that several desktop environments -- Cinnamon and XFCE
+# among them -- never activate it for the systemd --user manager at all, so
+# a unit that ONLY depends on it would silently never auto-start there.
+# Multiple WantedBy targets below cover both cases: on GNOME/KDE this starts
+# via graphical-session.target (correct timing); on Cinnamon/XFCE (and
+# anything else that never sets it) it still starts via default.target,
+# which every systemd user session activates regardless of DE. Both targets
+# get an enable-symlink; whichever actually fires first starts the service,
+# and a duplicate trigger from the other is a harmless no-op.
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tetron-systray
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target graphical-session.target

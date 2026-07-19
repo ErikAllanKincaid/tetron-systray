@@ -26,10 +26,29 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
+use clap::{Parser, Subcommand};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 
 mod ipc_client;
+mod service;
+
+#[derive(Parser)]
+#[command(name = "tetron-systray")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Install and start the per-user service (systemd --user on Linux,
+    /// a launchd LaunchAgent on macOS) so tetron-systray starts with your
+    /// graphical session instead of needing to be run manually
+    Install,
+    /// Stop and remove the per-user service
+    Uninstall,
+}
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
@@ -92,6 +111,13 @@ fn spawn_status_poller(tx: mpsc::Sender<DaemonState>) {
 }
 
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Command::Install) => return service::install(),
+        Some(Command::Uninstall) => return service::uninstall(),
+        None => {}
+    }
+
     #[cfg(target_os = "linux")]
     gtk::init()?;
 

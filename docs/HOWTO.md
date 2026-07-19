@@ -108,3 +108,61 @@ Full research trail (fetched while scaffolding, 2026-07-19):
 - **Menu is a placeholder** (status line + Quit only). The real per-network
   submenu, member list, clipboard-detect join, etc. are scoped but not yet
   implemented — see the function-scope doc referenced above.
+- **Service-level verification done, visual verification still pending.**
+  `tetron-systray install`/`uninstall` (see below) were live-tested on
+  a real Cinnamon desktop machine, not headless: the service installs,
+  starts, stays active with no crash-loop, and uninstalls cleanly. That
+  confirms the *process* runs correctly under systemd --user. It does
+  **not** confirm the tray icon actually renders or responds to clicks —
+  that still needs a human looking at the actual menu bar, which this
+  environment can't do.
+
+## Per-user service (install/uninstall)
+
+```bash
+cargo build --release
+sudo install target/release/tetron-systray /usr/local/bin/tetron-systray
+tetron-systray install     # no sudo needed for this step
+tetron-systray uninstall
+```
+
+Same shape as `tetron-webui`'s own per-user service (see its
+`docs/HOWTO.md`/README): `systemd --user` on Linux, a launchd
+**LaunchAgent** on macOS. `contrib/tetron-systray.service` /
+`contrib/com.tetron.systray.plist` are the templates; `src/service.rs`
+substitutes the real binary path at install time, same pattern as
+`tetron install` itself.
+
+### The `graphical-session.target` gotcha (found live, 2026-07-19)
+
+A tray app's service unit needs a graphical session to exist before it can
+do anything useful — unlike `tetron-webui`'s headless HTTP server, which
+only needs a login session. `graphical-session.target` is the systemd-user
+concept for exactly this, and it's the semantically correct thing to depend
+on. **It is not universally activated, though**, and this isn't
+theoretical — installing on a real Cinnamon desktop machine (a real X11 session
+confirmed active via `loginctl`) showed `graphical-session.target` sitting
+permanently `inactive` in `systemctl --user list-units --type=target`, even
+mid-session. A unit that only depended on it would never auto-start there.
+
+GNOME and KDE Plasma both wire their own session managers up to properly
+activate `graphical-session.target` (documented systemd-desktop
+integration, not independently re-verified here) — but Cinnamon and XFCE
+are known not to. The fix: `[Install]` lists **both**
+`WantedBy=default.target graphical-session.target`. `systemctl --user
+enable` creates an enable-symlink under each target's `.wants/` directory;
+whichever target actually activates on a given desktop starts the service,
+and a redundant trigger from the other is a harmless no-op (confirmed live:
+both symlinks get created, `uninstall` removes both cleanly). `default.target`
+is the safety net — every systemd user session activates it regardless of
+desktop environment, so this can't silently fail to auto-start the way a
+`graphical-session.target`-only dependency would have on Cinnamon/XFCE.
+
+**Verified (real Cinnamon desktop machine):** `graphical-session.target` confirmed
+inactive; install creates both `.wants/` symlinks; service starts, runs,
+and survives a manual `uninstall` cleanly (both symlinks removed, unit file
+gone, host left exactly as found). **Not independently verified:** GNOME's
+and KDE's actual `graphical-session.target` activation behavior (relying on
+documented systemd/desktop-environment integration, not live-tested against
+real GNOME/KDE machines from this environment) and XFCE's lack of support
+(same — documented community knowledge, not live-tested here).
