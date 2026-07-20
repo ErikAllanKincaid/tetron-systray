@@ -4033,6 +4033,7 @@ dependencies = [
  "clap",
  "dirs",
  "gtk",
+ "iroh",
  "tetron-proto",
  "tokio",
  "tray-icon",

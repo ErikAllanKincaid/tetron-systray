@@ -34,6 +34,11 @@ arboard = "3"
 # logic in its Cargo.toml (src/invite.rs isn't public from the tetron
 # binary crate, so this is reimplemented, not imported).
 bs58 = "0.5"
+# Needed directly for EndpointId (used decoding an invite code) -- version
+# must track tetron-proto's own pin so Cargo resolves both to the same
+# underlying type rather than two incompatible iroh versions. Same as
+# tetron-webui's own Cargo.toml comment.
+iroh = "1"
 # `install`/`uninstall` subcommands for the per-user service, and locating
 # ~/.config (Linux) / ~/Library (macOS) for the unit/plist. Same
 # crates/versions tetron-webui's own per-user service install uses.
@@ -42,9 +47,9 @@ dirs = "6.0.0"
 
 # Linux-only: tray-icon requires a real gtk event loop pumping on the
 # tray-icon-owning thread to actually render/respond to clicks (see
-# docs/HOWTO.md's "Event loop" section) -- it pulls gtk in transitively for
-# its own backend but doesn't re-export it, so this is needed directly to
-# call gtk::init()/main_iteration_do() ourselves. Version matches what
-# tray-icon's own Linux examples build against.
+# docs/HOWTO_Build_A_Systray.md's "Event loop" section) -- it pulls gtk in
+# transitively for its own backend but doesn't re-export it, so this is
+# needed directly to call gtk::init()/main_iteration_do() ourselves. Version
+# matches what tray-icon's own Linux examples build against.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
