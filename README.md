@@ -6,18 +6,18 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 **Not a network picker.** Unlike Tailscale's tray (whose main job is choosing *which one* tailnet you're on), tetron can be joined to several networks simultaneously, each independently toggleable — so this tray is a status dashboard with a per-network toggle, not a switcher.
 
-## Status: early scaffold
-
-v1 skeleton only — status polling, icon color state, and a placeholder menu (Quit). The real function list (per-network resume/standby, member list with copyable IPs, clipboard-detect join, etc.) is scoped but not yet implemented. **See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)** for build instructions, the full crate/dependency rationale, and — importantly — the event-loop research behind the current design (a real gotcha: `tray-icon` needs a genuine platform event loop pumping, not just a bare polling loop; not well documented anywhere as a single copy-pasteable example, so that HOWTO is worth reading before changing the event loop code).
-
-**Not yet visually verified** — the service-level plumbing (install, runs, survives, uninstalls cleanly) is live-tested on real Linux hardware (Cinnamon desktop), but nobody has looked at an actual menu bar and confirmed the icon renders. Details in the HOWTO's "Status of this repo" section.
-
 ## Running it
 
 **Primary path: download a pre-built binary, no Rust toolchain needed.**
 Most people running this don't have (and shouldn't need) `cargo` installed.
 
 ```bash
+# First install tetron daemon.
+curl -Lo tetron https://github.com/ErikAllanKincaid/tetron/releases/latest/download/tetron-linux-x86_64
+chmod +x tetron
+sudo install tetron /usr/local/bin/tetron
+sudo tetron install
+
 # Linux x86_64 -- see the releases page for aarch64 / macOS binaries:
 # https://github.com/ErikAllanKincaid/tetron-systray/releases/latest
 curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
@@ -37,6 +37,8 @@ cargo build --release   # needs GTK + libxdo + an app-indicator library on Linux
 ```
 
 Only needed if you're changing the code, or a pre-built binary isn't published for your platform yet.
+
+**See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)** for build instructions, the full crate/dependency rationale, current status (what's implemented, what isn't, what's live-tested vs. not), and — importantly — the event-loop research behind the current design (a real gotcha: `tray-icon` needs a genuine platform event loop pumping, not just a bare polling loop; not well documented anywhere as a single copy-pasteable example, so that HOWTO is worth reading before changing the event loop code).
 
 ## Architecture
 

@@ -214,12 +214,17 @@ toolchain (Cocoa APIs via `objc2`).
 
 ## Status of this repo (honest, as of this writing)
 
-Service-level correctness is live-tested (install/uninstall, crash
-recovery, correct multi-desktop targeting). Actual visual rendering of the
-tray icon has not been independently confirmed from the environment this
-was built in (no display available there) — confirm on your own desktop
-before trusting it beyond "the service runs." The real per-network
-menu/member-list/clipboard-join functionality described in this repo's own
-planning is not yet implemented; this scaffold establishes the
-plumbing (IPC client, icon lifecycle, event loop, per-user service) that
-the rest builds on.
+The v1 function list is implemented: per-network resume/standby toggle, a
+member list (self included) with click-to-copy IPs, copy-invite-key,
+clipboard-detect join, resume-all/standby-all, and an open-webui launcher.
+Service-level correctness is live-tested on real hardware (install/
+uninstall, crash recovery, correct multi-desktop `systemd --user`
+targeting). **Not yet confirmed: actual visual rendering of the tray
+icon/menu** — this was built and deployed from an environment with no
+display, so nobody has independently looked at a real menu bar and
+confirmed the icon renders and the menu looks right; confirm on your own
+desktop before trusting it beyond "the service runs without crashing."
+Toggleable notifications (peer online/offline, daemon unreachable) are
+scoped but not yet implemented. macOS's event-loop integration (the Cocoa
+run-loop pump — see "Event loop" above) is unwritten, not just
+unverified.
