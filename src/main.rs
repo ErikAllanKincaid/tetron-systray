@@ -88,9 +88,33 @@ enum PollResult {
 /// solid block. Matches the visual language tray icons actually use
 /// (Tailscale, Docker Desktop, etc: a small colored indicator, not an
 /// opaque square filling the whole canvas).
-fn solid_icon(rgb: [u8; 3]) -> Icon {
+///
+/// A plain colored dot reads as generic among other menu-bar apps' own
+/// status dots (found live-testing on a real Mac, 2026-07-24), so a
+/// capital "T" is drawn in `glyph` on top -- geometrically (a top bar
+/// flush with the top of the glyph, a stem centered below it, both
+/// centered on the dot's own centerline), not via a rendered font glyph,
+/// to avoid pulling in a font-rendering crate + embedded font for what's
+/// meant to stay a minimal, dependency-free icon generator. The bar sits
+/// flush at the top with no protrusion above it deliberately -- an
+/// earlier lowercase-"t" attempt (a short flag poking above the
+/// crossbar) read as a Christian cross instead of a letter, which a
+/// capital T's flush-top bar avoids entirely. Clipped to the circle's own
+/// alpha mask so the glyph never draws outside the visible dot. `glyph`
+/// is a separate color per call site (rather than always white) because
+/// contrast, not glyph size, turned out to be the real legibility
+/// constraint at real menu-bar render size: white nearly vanishes against
+/// the light standby grey specifically, confirmed by rendering to PNG at
+/// simulated menu-bar scale before shipping this.
+fn solid_icon(rgb: [u8; 3], glyph: [u8; 3]) -> Icon {
     const SIZE: u32 = 32;
     const RADIUS: f32 = 12.0; // leaves visible transparent margin in a 32x32 canvas
+    const STEM_HALF_WIDTH: f32 = 1.75;
+    const STEM_TOP: f32 = 11.0;
+    const STEM_BOTTOM: f32 = 23.0;
+    const BAR_HALF_WIDTH: f32 = 5.5;
+    const BAR_TOP: f32 = 8.0;
+    const BAR_BOTTOM: f32 = 11.0;
     let center = (SIZE as f32 - 1.0) / 2.0;
     let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
     for y in 0..SIZE {
@@ -106,19 +130,33 @@ fn solid_icon(rgb: [u8; 3]) -> Icon {
             } else {
                 0
             };
-            rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+            let yf = y as f32;
+            let in_stem = dx.abs() <= STEM_HALF_WIDTH && (STEM_TOP..=STEM_BOTTOM).contains(&yf);
+            let in_bar = dx.abs() <= BAR_HALF_WIDTH && (BAR_TOP..=BAR_BOTTOM).contains(&yf);
+            let color = if alpha > 0 && (in_stem || in_bar) {
+                glyph
+            } else {
+                rgb
+            };
+            rgba.extend_from_slice(&[color[0], color[1], color[2], alpha]);
         }
     }
     Icon::from_rgba(rgba, SIZE, SIZE).expect("valid fixed-size RGBA buffer")
 }
 
 fn icon_for(reachable: bool, active: bool) -> Icon {
+    const WHITE: [u8; 3] = [255, 255, 255];
+    // Standby's light grey is close enough in luminance to white that the
+    // glyph nearly disappears on it (confirmed by rendering at simulated
+    // menu-bar scale) -- a dark glyph is used there instead. Red and green
+    // are both dark enough that white reads cleanly.
+    const DARK: [u8; 3] = [60, 63, 70];
     if !reachable {
-        solid_icon([229, 115, 115]) // matches webui --status-down
+        solid_icon([229, 115, 115], WHITE) // matches webui --status-down
     } else if active {
-        solid_icon([76, 175, 80]) // matches webui --status-active
+        solid_icon([76, 175, 80], WHITE) // matches webui --status-active
     } else {
-        solid_icon([154, 159, 168]) // matches webui --status-standby
+        solid_icon([154, 159, 168], DARK) // matches webui --status-standby
     }
 }
 
