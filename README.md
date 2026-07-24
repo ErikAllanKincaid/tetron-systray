@@ -10,8 +10,17 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Running it
 
-**Primary path: download a pre-built binary, no Rust toolchain needed.**
-Most people running this don't have (and shouldn't need) `cargo` installed.
+**Primary path: install from [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel.**
+Once webui is running (`http://127.0.0.1:7870`), its Add-ons panel detects,
+downloads, verifies, and installs `tetron-systray` in one click — no manual
+binary download, no `sudo`. Verified end to end on real hardware, both
+platforms: a fresh install correctly renders a working tray icon on Linux
+(GNOME) and macOS (a real M1 Mac), and re-installing over an
+already-running instance (e.g. to pick up an upgrade) cleanly restarts it
+rather than leaving the old binary in memory on either platform.
+
+**Manual path: download a pre-built binary directly, no Rust toolchain
+needed.** Useful if you don't want to run `tetron-webui` at all.
 
 ```bash
 # First install tetron daemon.
@@ -29,7 +38,7 @@ sudo install tetron-systray /usr/local/bin/tetron-systray
 tetron-systray install     # sets up + starts a per-user service, no sudo needed
 ```
 
-Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). Verified end to end on real hardware: install creates both enable-symlinks, the service runs without crash-looping, and `tetron-systray uninstall` removes everything cleanly. Re-running `install` (e.g. to pick up an upgraded binary) always restarts the running instance rather than leaving the old one in memory — on Linux this needs an explicit `restart`, not just `enable --now`, which is a no-op against an already-active unit (found live 2026-07-24 testing `tetron-webui`'s addon-install framework). **macOS is now live-tested too** (a real M1 Mac, macOS 26): `install` wraps the binary in a minimal `~/Applications/TetronSystray.app` bundle (a real `CFBundleIdentifier`/`LSUIElement` are required for the status item to appear in the menu bar at all -- a bare binary does not work) and drains `NSApplication`'s own event queue each tick so clicks actually open the menu, not just a bare Cocoa run-loop pump (see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)'s "Event loop" section for the full story). Confirmed surviving a full reboot and a real `install`/`uninstall` round-trip.
+Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). On macOS, `install` wraps the binary in a minimal `~/Applications/TetronSystray.app` bundle (a real `CFBundleIdentifier`/`LSUIElement` are required for the status item to appear in the menu bar at all -- a bare binary does not work) and drains `NSApplication`'s own event queue each tick so clicks actually open the menu, not just a bare Cocoa run-loop pump (see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)'s "Event loop" section for the full story).
 
 ### Building from source / development
 
