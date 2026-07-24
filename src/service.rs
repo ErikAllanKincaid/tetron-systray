@@ -84,6 +84,19 @@ fn bundle_dir() -> Result<PathBuf> {
 /// tetron's own `ensure_service_installed` and tetron-webui's `install`
 /// use), enable it, and wait for the service manager to report it active
 /// before declaring success.
+///
+/// **Always forces a restart, not just enable/start.** Found live
+/// (2026-07-24, testing tetron-webui's addon-install framework): running
+/// `install` again to relocate/upgrade an *already-active* instance --
+/// e.g. a fresh binary downloaded to a new path -- rewrites the unit's
+/// `ExecStart` correctly, but `enable --now` is a no-op on an already-
+/// running unit; the live process keeps executing whatever binary it
+/// originally loaded, never picking up the new one. `restart` (unlike
+/// `start`) unconditionally reloads, whether the unit was previously
+/// stopped or running, so `install` now always ends with the actual
+/// current on-disk binary in memory. macOS's own `unload`+`load` cycle
+/// just below already had this property -- only Linux's `enable --now`
+/// needed the fix.
 pub fn install() -> Result<()> {
     let exe = std::env::current_exe()
         .context("failed to determine current executable path")?
@@ -97,7 +110,8 @@ pub fn install() -> Result<()> {
             .replace("/usr/local/bin/tetron-systray", &exe);
         std::fs::write(&path, unit).with_context(|| format!("failed to write {}", path.display()))?;
         run_cmd("systemctl", &["--user", "daemon-reload"]);
-        run_cmd("systemctl", &["--user", "enable", "--now", "tetron-systray"]);
+        run_cmd("systemctl", &["--user", "enable", "tetron-systray"]);
+        run_cmd("systemctl", &["--user", "restart", "tetron-systray"]);
     }
 
     #[cfg(target_os = "macos")]
