@@ -21,12 +21,32 @@
 //! string; deferred rather than adding that round-trip cost to every poll
 //! for a "nice to have" cosmetic marker.
 //!
-//! Known gap, not yet resolved: `tray-icon` requires a real platform event
-//! loop pumping on the tray-icon-owning thread (a gtk loop on Linux, the
-//! Cocoa run loop on macOS -- see the crate's own top-level docs) for the
-//! icon to actually render and respond to clicks. This file pumps gtk on
-//! Linux; macOS needs the equivalent Cocoa run-loop integration, not yet
-//! written (see docs/HOWTO_Build_A_Systray.md).
+//! `tray-icon` requires a real platform event loop pumping on the
+//! tray-icon-owning thread (a gtk loop on Linux, the Cocoa run loop on
+//! macOS -- see the crate's own top-level docs) for the icon to actually
+//! render and respond to clicks. This file pumps gtk on Linux and, since
+//! 2026-07-24, `CFRunLoop::run_in_mode` on macOS (found live-testing on a
+//! real M1 Mac: the status item's FrontBoard scene registration completed
+//! without error, but nothing ever appeared in the menu bar, since nothing
+//! was servicing the run loop that actually paints it -- see
+//! docs/HOWTO_Build_A_Systray.md).
+//!
+//! macOS status as of 2026-07-24: this pump reliably makes the icon
+//! render, and produced a fully working icon-plus-click-menu once in live
+//! testing on a real M1 Mac (macOS 26). Subsequent tests in the same
+//! session, after rapid reload/reconfigure churn (swapping between a bare
+//! binary and an app-bundle-wrapped one, several `launchctl load`/`unload`
+//! cycles, a Control Center restart) on the same bundle identifier,
+//! stopped responding to clicks despite an apparently identical
+//! configuration -- not yet confirmed whether that is stale
+//! per-bundle-identifier Control Center/LaunchServices state from the
+//! churn (a known flaky spot for macOS menu-bar apps under active
+//! development) or a genuine remaining bug. A branch,
+//! `wip/macos-nsapp-eventpump-attempt`, layers an `NSApplication`
+//! activation-policy + `nextEventMatchingMask`/`sendEvent` pump on top of
+//! this same commit in case a clean single-shot test (full logout/login,
+//! no rapid reload) does not resolve it -- see that branch's own commit
+//! message for the full reasoning and exact API used.
 
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -405,6 +425,18 @@ fn main() -> anyhow::Result<()> {
         #[cfg(target_os = "linux")]
         while gtk::events_pending() {
             gtk::main_iteration_do(false);
+        }
+
+        // macOS: non-blocking single pump of the Cocoa run loop, mirroring
+        // the gtk iteration above -- without this, NSStatusItem never
+        // actually paints (see this file's top-level doc comment).
+        #[cfg(target_os = "macos")]
+        unsafe {
+            core_foundation::runloop::CFRunLoop::run_in_mode(
+                core_foundation::runloop::kCFRunLoopDefaultMode,
+                Duration::from_millis(0),
+                true,
+            );
         }
 
         if let Ok(result) = status_rx.try_recv() {

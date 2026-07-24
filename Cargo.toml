@@ -53,3 +53,15 @@ dirs = "6.0.0"
 # matches what tray-icon's own Linux examples build against.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+# macOS-only: the Cocoa-side equivalent of the gtk pump above -- tray-icon's
+# NSStatusItem needs the run loop actively turning to actually paint, not
+# just to exist as an object. Found live-testing on a real M1 Mac (macOS
+# 26): without any pump, the status item's FrontBoard/SceneKit
+# registration completed without error, but nothing ever appeared in the
+# menu bar. `core-foundation` is already present transitively (via
+# tray-icon's own objc2-app-kit chain); pinned directly here to call
+# `CFRunLoop::run_in_mode` ourselves, mirroring gtk's non-blocking
+# single-iteration pump exactly.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
