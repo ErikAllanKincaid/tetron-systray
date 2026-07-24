@@ -392,6 +392,53 @@ fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) 
     }
 }
 
+/// macOS only: set `NSApplication`'s activation policy to `Accessory`
+/// (menu-bar-only, no Dock icon/app-switcher entry -- matches `LSUIElement`
+/// in the app-bundle `Info.plist`) and prime the run loop with a short
+/// burst of pumps before the tray icon is built. tray-icon's own docs say
+/// the event loop "must already be running... before creating a TrayIcon,"
+/// which the continuous pump inside the main loop below (which only starts
+/// *after* `TrayIconBuilder::build()`) does not satisfy on its own --
+/// found live-testing on a real M1 Mac: the icon and menu worked once, then
+/// stopped responding to clicks on a subsequent relaunch with the exact
+/// same binary, matching this ordering requirement rather than a one-off
+/// fluke.
+///
+/// **Tested 2026-07-24, did not resolve the click issue on its own** (see
+/// this file's top-level doc comment) -- kept here as a documented,
+/// working-but-incomplete step rather than discarded, since it may still
+/// be a necessary (if insufficient) part of the real fix. The next
+/// untested step, if a clean single-shot test (full logout/login, no
+/// rapid reload churn) still does not resolve click-through: replace the
+/// bare `CFRunLoop::run_in_mode` pump (both here and in the main loop
+/// below) with a proper `NSApplication` event pump --
+/// `app.nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any,
+/// Some(&NSDate::distantPast(mtm)), NSDefaultRunLoopMode, true)` followed
+/// by `app.sendEvent(&event)` in a loop until `None` -- since mouse clicks
+/// on a status item are delivered as `NSEvent`s through `NSApplication`'s
+/// own event queue, a layer the bare CFRunLoop pump does not drain (this
+/// is what `tao`/`winit`'s event loop does internally, and why tray-icon's
+/// own examples lean on one of those rather than a raw run-loop pump).
+#[cfg(target_os = "macos")]
+fn macos_prepare_run_loop() {
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    use objc2_foundation::MainThreadMarker;
+
+    let mtm = MainThreadMarker::new().expect("tetron-systray must run on the main thread");
+    let app = NSApplication::sharedApplication(mtm);
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+    for _ in 0..10 {
+        unsafe {
+            core_foundation::runloop::CFRunLoop::run_in_mode(
+                core_foundation::runloop::kCFRunLoopDefaultMode,
+                Duration::from_millis(10),
+                true,
+            );
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -402,6 +449,9 @@ fn main() -> anyhow::Result<()> {
 
     #[cfg(target_os = "linux")]
     gtk::init()?;
+
+    #[cfg(target_os = "macos")]
+    macos_prepare_run_loop();
 
     let mut reachable = false;
     let mut active = false;

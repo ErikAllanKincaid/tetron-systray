@@ -55,13 +55,22 @@ dirs = "6.0.0"
 gtk = "0.18"
 
 # macOS-only: the Cocoa-side equivalent of the gtk pump above -- tray-icon's
-# NSStatusItem needs the run loop actively turning to actually paint, not
-# just to exist as an object. Found live-testing on a real M1 Mac (macOS
-# 26): without any pump, the status item's FrontBoard/SceneKit
-# registration completed without error, but nothing ever appeared in the
-# menu bar. `core-foundation` is already present transitively (via
-# tray-icon's own objc2-app-kit chain); pinned directly here to call
+# NSStatusItem needs the run loop actively turning to actually paint and
+# respond to clicks, not just to exist as an object. Found live-testing on
+# a real M1 Mac (macOS 26): without any pump, the status item's
+# FrontBoard/SceneKit registration completed without error but nothing
+# ever appeared in the menu bar. `core-foundation` (already present
+# transitively via tray-icon's own objc2-app-kit chain) calls
 # `CFRunLoop::run_in_mode` ourselves, mirroring gtk's non-blocking
-# single-iteration pump exactly.
+# single-iteration pump. `objc2-app-kit`/`objc2-foundation` (same versions
+# tray-icon 0.19 itself already pulls in for its macOS backend, so Cargo
+# resolves one shared copy) set `NSApplication`'s activation policy to
+# `Accessory` (menu-bar-only, no Dock icon/app switcher entry) and prime
+# the run loop *before* the tray icon is built -- tray-icon's own top-level
+# docs say the event loop "must already be running... before creating a
+# TrayIcon," which pumping only inside the post-creation loop does not
+# satisfy.
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
+objc2-foundation = "0.3"
