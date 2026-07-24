@@ -24,29 +24,21 @@
 //! `tray-icon` requires a real platform event loop pumping on the
 //! tray-icon-owning thread (a gtk loop on Linux, the Cocoa run loop on
 //! macOS -- see the crate's own top-level docs) for the icon to actually
-//! render and respond to clicks. This file pumps gtk on Linux and, since
-//! 2026-07-24, `CFRunLoop::run_in_mode` on macOS (found live-testing on a
-//! real M1 Mac: the status item's FrontBoard scene registration completed
-//! without error, but nothing ever appeared in the menu bar, since nothing
-//! was servicing the run loop that actually paints it -- see
-//! docs/HOWTO_Build_A_Systray.md).
+//! render and respond to clicks. This file pumps gtk on Linux.
 //!
-//! macOS status as of 2026-07-24: this pump reliably makes the icon
-//! render, and produced a fully working icon-plus-click-menu once in live
-//! testing on a real M1 Mac (macOS 26). Subsequent tests in the same
-//! session, after rapid reload/reconfigure churn (swapping between a bare
-//! binary and an app-bundle-wrapped one, several `launchctl load`/`unload`
-//! cycles, a Control Center restart) on the same bundle identifier,
-//! stopped responding to clicks despite an apparently identical
-//! configuration -- not yet confirmed whether that is stale
-//! per-bundle-identifier Control Center/LaunchServices state from the
-//! churn (a known flaky spot for macOS menu-bar apps under active
-//! development) or a genuine remaining bug. A branch,
-//! `wip/macos-nsapp-eventpump-attempt`, layers an `NSApplication`
-//! activation-policy + `nextEventMatchingMask`/`sendEvent` pump on top of
-//! this same commit in case a clean single-shot test (full logout/login,
-//! no rapid reload) does not resolve it -- see that branch's own commit
-//! message for the full reasoning and exact API used.
+//! macOS history (2026-07-24, live-tested on a real M1 Mac, macOS 26):
+//! a bare `CFRunLoop::run_in_mode` pump (the version on `main`) reliably
+//! renders the status item -- confirmed surviving a full reboot with a
+//! single clean launch -- but clicking it never opened the menu, reboot
+//! or not, ruling out stale test-churn state as the explanation. Root
+//! cause: mouse clicks on a status item are `NSEvent`s delivered through
+//! `NSApplication`'s own event queue, a layer the bare CFRunLoop pump
+//! does not drain. Fixed here by setting `NSApplication`'s activation
+//! policy to `Accessory` and draining its event queue directly each tick
+//! (`nextEventMatchingMask`/`sendEvent`) -- what `tao`/`winit`'s event
+//! loop does internally, and why tray-icon's own examples lean on one of
+//! those instead of a raw run-loop pump. See `macos_prepare_app`/
+//! `macos_pump_events`'s own doc comments for the exact API.
 
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -394,47 +386,54 @@ fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) 
 
 /// macOS only: set `NSApplication`'s activation policy to `Accessory`
 /// (menu-bar-only, no Dock icon/app-switcher entry -- matches `LSUIElement`
-/// in the app-bundle `Info.plist`) and prime the run loop with a short
-/// burst of pumps before the tray icon is built. tray-icon's own docs say
-/// the event loop "must already be running... before creating a TrayIcon,"
-/// which the continuous pump inside the main loop below (which only starts
-/// *after* `TrayIconBuilder::build()`) does not satisfy on its own --
-/// found live-testing on a real M1 Mac: the icon and menu worked once, then
-/// stopped responding to clicks on a subsequent relaunch with the exact
-/// same binary, matching this ordering requirement rather than a one-off
-/// fluke.
+/// in the app-bundle `Info.plist`), returning the shared `NSApplication`
+/// handle for `macos_pump_events` to drain each tick.
 ///
-/// **Tested 2026-07-24, did not resolve the click issue on its own** (see
-/// this file's top-level doc comment) -- kept here as a documented,
-/// working-but-incomplete step rather than discarded, since it may still
-/// be a necessary (if insufficient) part of the real fix. The next
-/// untested step, if a clean single-shot test (full logout/login, no
-/// rapid reload churn) still does not resolve click-through: replace the
-/// bare `CFRunLoop::run_in_mode` pump (both here and in the main loop
-/// below) with a proper `NSApplication` event pump --
-/// `app.nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any,
-/// Some(&NSDate::distantPast(mtm)), NSDefaultRunLoopMode, true)` followed
-/// by `app.sendEvent(&event)` in a loop until `None` -- since mouse clicks
-/// on a status item are delivered as `NSEvent`s through `NSApplication`'s
-/// own event queue, a layer the bare CFRunLoop pump does not drain (this
-/// is what `tao`/`winit`'s event loop does internally, and why tray-icon's
-/// own examples lean on one of those rather than a raw run-loop pump).
+/// **History:** a bare `CFRunLoop::run_in_mode` pump (previous version of
+/// this function, and the version committed to `main`) reliably renders
+/// the status item, confirmed on a real M1 Mac (macOS 26) surviving a full
+/// reboot with a single clean launch -- but clicking it never opens the
+/// menu, reboot or not. That rules out stale test-churn state as the
+/// explanation. Root cause: mouse clicks on a status item are delivered as
+/// `NSEvent`s through `NSApplication`'s own event queue, a layer the bare
+/// CFRunLoop pump does not drain -- it processes CF-level run-loop
+/// sources/timers, not AppKit's event queue. This is exactly what
+/// `tao`/`winit`'s event loop does internally, and why tray-icon's own
+/// examples lean on one of those instead of a raw run-loop pump.
 #[cfg(target_os = "macos")]
-fn macos_prepare_run_loop() {
+fn macos_prepare_app() -> objc2::rc::Retained<objc2_app_kit::NSApplication> {
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
     use objc2_foundation::MainThreadMarker;
 
     let mtm = MainThreadMarker::new().expect("tetron-systray must run on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    app
+}
 
-    for _ in 0..10 {
-        unsafe {
-            core_foundation::runloop::CFRunLoop::run_in_mode(
-                core_foundation::runloop::kCFRunLoopDefaultMode,
-                Duration::from_millis(10),
+/// macOS only: drain every currently-pending `NSEvent` from `NSApplication`'s
+/// own event queue and dispatch it (`sendEvent`), non-blocking (returns as
+/// soon as the queue is empty) -- the AppKit-level analogue of the gtk
+/// pump above. Without this, a status item can render (driven by lower-level
+/// CF/FrontBoard scene machinery) while still never receiving the mouse
+/// click that should open its menu.
+#[cfg(target_os = "macos")]
+fn macos_pump_events(app: &objc2_app_kit::NSApplication) {
+    use objc2_app_kit::NSEventMask;
+    use objc2_foundation::{NSDate, NSDefaultRunLoopMode};
+
+    loop {
+        let event = unsafe {
+            app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                NSEventMask::Any,
+                Some(&NSDate::distantPast()),
+                NSDefaultRunLoopMode,
                 true,
-            );
+            )
+        };
+        match event {
+            Some(event) => app.sendEvent(&event),
+            None => break,
         }
     }
 }
@@ -451,7 +450,7 @@ fn main() -> anyhow::Result<()> {
     gtk::init()?;
 
     #[cfg(target_os = "macos")]
-    macos_prepare_run_loop();
+    let macos_app = macos_prepare_app();
 
     let mut reachable = false;
     let mut active = false;
@@ -477,17 +476,11 @@ fn main() -> anyhow::Result<()> {
             gtk::main_iteration_do(false);
         }
 
-        // macOS: non-blocking single pump of the Cocoa run loop, mirroring
-        // the gtk iteration above -- without this, NSStatusItem never
-        // actually paints (see this file's top-level doc comment).
+        // macOS: drain NSApplication's own event queue, mirroring the gtk
+        // iteration above -- without this, clicks on the status item are
+        // never dispatched (see macos_pump_events's doc comment).
         #[cfg(target_os = "macos")]
-        unsafe {
-            core_foundation::runloop::CFRunLoop::run_in_mode(
-                core_foundation::runloop::kCFRunLoopDefaultMode,
-                Duration::from_millis(0),
-                true,
-            );
-        }
+        macos_pump_events(&macos_app);
 
         if let Ok(result) = status_rx.try_recv() {
             match result {
