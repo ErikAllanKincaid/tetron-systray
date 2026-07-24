@@ -254,7 +254,7 @@ fn build_menu(
             let online = net.peers.iter().filter(|p| p.connection.is_some()).count();
             let header = format!(
                 "{}  ({online}/{} online){}",
-                net.name,
+                net.network,
                 net.member_count,
                 if net.active { "" } else { "  ·standby·" }
             );
@@ -263,19 +263,19 @@ fn build_menu(
             sub.append(&PredefinedMenuItem::separator())?;
 
             let toggle_id = if net.active {
-                format!("standby:{}", net.name)
+                format!("standby:{}", net.network)
             } else {
-                format!("resume:{}", net.name)
+                format!("resume:{}", net.network)
             };
             let toggle_text = if net.active {
-                format!("Standby \"{}\"", net.name)
+                format!("Standby \"{}\"", net.network)
             } else {
-                format!("Resume \"{}\"", net.name)
+                format!("Resume \"{}\"", net.network)
             };
             sub.append(&MenuItem::with_id(toggle_id, toggle_text, true, None))?;
             if net.role == tetron_proto::ipc::NetworkRole::Coordinator {
                 sub.append(&MenuItem::with_id(
-                    format!("copy_invite:{}", net.name),
+                    format!("copy_invite:{}", net.network),
                     "Copy invite key (mints a new one)",
                     true,
                     None,
@@ -329,7 +329,7 @@ fn render_fingerprint(
     use std::fmt::Write;
     let mut s = format!("{reachable}|{active}|");
     for net in networks {
-        let _ = write!(s, "{}:{}:{}:{}:{};", net.name, net.active, net.member_count, net.my_ip, net.role);
+        let _ = write!(s, "{}:{}:{}:{}:{};", net.network, net.active, net.member_count, net.my_ip, net.role);
         for p in &net.peers {
             let _ = write!(
                 s,
