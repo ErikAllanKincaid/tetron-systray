@@ -63,6 +63,22 @@ fn log_path() -> Result<PathBuf> {
     Ok(dir.join("tetron-systray.log"))
 }
 
+/// `~/Applications/TetronSystray.app`. Not `NSApplicationActivationPolicy`
+/// itself but a prerequisite for it: without a real bundle (`CFBundleExecutable`/
+/// `CFBundleIdentifier`/`LSUIElement` in `Contents/Info.plist`), the status
+/// item never actually appears in the menu bar at all -- found live-testing
+/// on a real M1 Mac (macOS 26), see `src/main.rs`'s own top-level doc comment
+/// for the full story. A bare `current_exe()` binary (this function's
+/// pre-2026-07-24 behavior) is not enough.
+#[cfg(target_os = "macos")]
+fn bundle_dir() -> Result<PathBuf> {
+    let dir = dirs::home_dir()
+        .context("could not determine home directory")?
+        .join("Applications/TetronSystray.app");
+    std::fs::create_dir_all(dir.join("Contents/MacOS"))?;
+    Ok(dir)
+}
+
 /// `tetron-systray install`: write the unit/plist (substituting the path of
 /// the binary currently running, same idempotent-on-every-install pattern
 /// tetron's own `ensure_service_installed` and tetron-webui's `install`
@@ -86,10 +102,25 @@ pub fn install() -> Result<()> {
 
     #[cfg(target_os = "macos")]
     {
+        // A real app bundle (Contents/MacOS/<exe> + Contents/Info.plist with
+        // CFBundleIdentifier/LSUIElement) is a prerequisite for the status
+        // item to appear in the menu bar at all, not just an aesthetic
+        // nicety -- see bundle_dir()'s own doc comment. Copy (not symlink)
+        // the running binary in, so a stale copy can't be swapped out from
+        // under the running process's own executable inode.
+        let bundle = bundle_dir()?;
+        let bundled_exe = bundle.join("Contents/MacOS/tetron-systray");
+        std::fs::copy(&exe, &bundled_exe)
+            .with_context(|| format!("failed to copy binary into {}", bundled_exe.display()))?;
+        let info_plist = include_str!("../contrib/TetronSystray-Info.plist")
+            .replace("__VERSION__", env!("CARGO_PKG_VERSION"));
+        std::fs::write(bundle.join("Contents/Info.plist"), info_plist)
+            .with_context(|| format!("failed to write {}", bundle.join("Contents/Info.plist").display()))?;
+
         let path = plist_path()?;
         let log = log_path()?.to_string_lossy().into_owned();
         let plist = include_str!("../contrib/com.tetron.systray.plist")
-            .replace("/usr/local/bin/tetron-systray", &exe)
+            .replace("/usr/local/bin/tetron-systray", &bundled_exe.to_string_lossy())
             .replace("/tmp/tetron-systray.log", &log);
         std::fs::write(&path, plist).with_context(|| format!("failed to write {}", path.display()))?;
         run_cmd_quiet("launchctl", &["unload", &path.to_string_lossy()]);
@@ -136,6 +167,13 @@ pub fn uninstall() -> Result<()> {
             println!("Removed launchd LaunchAgent.");
         } else {
             println!("Service not installed.");
+        }
+        let bundle = dirs::home_dir()
+            .context("could not determine home directory")?
+            .join("Applications/TetronSystray.app");
+        if bundle.exists() {
+            std::fs::remove_dir_all(&bundle)
+                .with_context(|| format!("failed to remove {}", bundle.display()))?;
         }
         return Ok(());
     }

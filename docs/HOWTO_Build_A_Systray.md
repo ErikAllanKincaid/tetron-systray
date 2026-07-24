@@ -98,12 +98,62 @@ mismatched version can resolve to two incompatible copies of the same
 underlying GTK bindings. Real example: [`src/main.rs`](../src/main.rs) +
 [`Cargo.toml`](../Cargo.toml)'s `[target.'cfg(target_os = "linux")'.dependencies]` section.
 
-**macOS needs the equivalent Cocoa run-loop pump** (likely via
-`objc2`/`objc2-app-kit`'s `NSApplication` primitives, without pulling in a
-full framework) — not written here, since guessing at unverified platform
-API without real Mac hardware to compile-check against risks shipping
-confidently-wrong code. If you're building this for macOS, that's the next
-real piece of work, not a footnote.
+**macOS needs the equivalent `NSApplication` event pump** — written and
+live-tested 2026-07-24 on a real M1 Mac (macOS 26), in two layers that
+turned out to be genuinely separate requirements, not one:
+
+1. **A real app bundle is a prerequisite, not an aesthetic nicety.** A bare
+   binary (even with a working event pump) never gets a menu-bar icon at
+   all — AppKit logs `Cannot index window tabs due to missing main bundle
+   identifier` and the status item's Control-Center scene registration
+   never actually paints anything. The bundle needs, at minimum,
+   `Contents/MacOS/<exe>` plus a `Contents/Info.plist` with
+   `CFBundleExecutable`/`CFBundleIdentifier` set and `LSUIElement` `true`
+   (menu-bar-only, no Dock icon). Real example:
+   [`src/service.rs`](../src/service.rs)'s `bundle_dir()` + the `install()`
+   bundle-construction block, template at
+   [`contrib/TetronSystray-Info.plist`](../contrib/TetronSystray-Info.plist).
+
+2. **A bare `CFRunLoop::run_in_mode` pump is not enough either**, even
+   inside a proper bundle — it renders the icon reliably (confirmed
+   surviving a full reboot with a single clean launch) but never
+   dispatches clicks, reboot or not. Root cause: a status item's mouse
+   clicks are `NSEvent`s delivered through `NSApplication`'s own event
+   queue, a layer the bare CF-level run loop does not drain. The real fix
+   sets `NSApplication`'s activation policy to `Accessory` (matches
+   `LSUIElement` in the bundle) and drains its event queue directly each
+   tick:
+
+   ```rust
+   // Once, before building the tray icon:
+   let app = NSApplication::sharedApplication(mtm);
+   app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+   // Every loop tick, mirroring the gtk pump above:
+   loop {
+       let event = unsafe {
+           app.nextEventMatchingMask_untilDate_inMode_dequeue(
+               NSEventMask::Any,
+               Some(&NSDate::distantPast()),
+               NSDefaultRunLoopMode,
+               true,
+           )
+       };
+       match event {
+           Some(event) => app.sendEvent(&event),
+           None => break,
+       }
+   }
+   ```
+
+   This is exactly what `tao`/`winit`'s event loop does internally, and
+   why tray-icon's own examples lean on one of those instead of a raw
+   run-loop pump — reimplemented here directly via `objc2-app-kit`/
+   `objc2-foundation` (same versions `tray-icon` 0.19 itself already pulls
+   in, so Cargo resolves one shared copy) to avoid the extra framework
+   dependency. Real example: [`src/main.rs`](../src/main.rs)'s
+   `macos_prepare_app()`/`macos_pump_events()` + [`Cargo.toml`](../Cargo.toml)'s
+   `[target.'cfg(target_os = "macos")'.dependencies]` section.
 
 ## 4. Status polling on its own thread
 
@@ -217,14 +267,11 @@ toolchain (Cocoa APIs via `objc2`).
 The v1 function list is implemented: per-network resume/standby toggle, a
 member list (self included) with click-to-copy IPs, copy-invite-key,
 clipboard-detect join, resume-all/standby-all, and an open-webui launcher.
-Service-level correctness is live-tested on real hardware (install/
-uninstall, crash recovery, correct multi-desktop `systemd --user`
-targeting). **Not yet confirmed: actual visual rendering of the tray
-icon/menu** — this was built and deployed from an environment with no
-display, so nobody has independently looked at a real menu bar and
-confirmed the icon renders and the menu looks right; confirm on your own
-desktop before trusting it beyond "the service runs without crashing."
-Toggleable notifications (peer online/offline, daemon unreachable) are
-scoped but not yet implemented. macOS's event-loop integration (the Cocoa
-run-loop pump — see "Event loop" above) is unwritten, not just
-unverified.
+Service-level correctness is live-tested on real hardware on both
+platforms: Linux (install/uninstall, crash recovery, correct multi-desktop
+`systemd --user` targeting) and, since 2026-07-24, macOS (a real M1 Mac,
+macOS 26) — icon rendering, click-to-open-menu, `install`/`uninstall`
+round-trip, and surviving a full reboot are all confirmed working end to
+end through the actual CLI commands, not just manual testing. Toggleable
+notifications (peer online/offline, daemon unreachable) are scoped but not
+yet implemented.
