@@ -54,8 +54,14 @@ mod service;
 
 use clap::{Parser, Subcommand};
 
+/// Full version string: the crate version plus the git short SHA stamped in
+/// by `build.rs` (e.g. `0.8.4 (a1b2c3d4)`). The SHA distinguishes two builds
+/// that share the same, unbumped crate version -- same pattern as tetron
+/// core's own `FULL_VERSION`.
+const FULL_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_SHA"), ")");
+
 #[derive(Parser)]
-#[command(name = "tetron-systray")]
+#[command(name = "tetron-systray", version = FULL_VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -69,6 +75,9 @@ enum Command {
     Install,
     /// Stop and remove the per-user service
     Uninstall,
+    /// Print the tetron-systray version
+    #[command(visible_alias = "ver")]
+    Version,
 }
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -481,6 +490,10 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Command::Install) => return service::install(),
         Some(Command::Uninstall) => return service::uninstall(),
+        Some(Command::Version) => {
+            println!("tetron-systray {FULL_VERSION}");
+            return Ok(());
+        }
         None => {}
     }
 
