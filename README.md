@@ -51,6 +51,25 @@ Only needed if you're changing the code, or a pre-built binary isn't published f
 
 **See [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)** for build instructions, the full crate/dependency rationale, current status (what's implemented, what isn't, what's live-tested vs. not), and — importantly — the event-loop research behind the current design (a real gotcha: `tray-icon` needs a genuine platform event loop pumping, not just a bare polling loop; not well documented anywhere as a single copy-pasteable example, so that HOWTO is worth reading before changing the event loop code).
 
+## Upgrading
+
+**Via `tetron-webui`'s Add-ons panel:** installing over an already-running `tetron-systray` (the same button used for the initial install) fetches the latest release and cleanly restarts the service on the new binary — verified end to end on both platforms.
+
+**Manual path:** re-run the same install steps with a fresh binary:
+
+```bash
+curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
+chmod +x tetron-systray
+sudo install tetron-systray /usr/local/bin/tetron-systray   # overwrite the old binary at the same path
+tetron-systray install                                        # re-registers the service and restarts it on the new binary
+```
+
+`install` is idempotent and safe to run over an already-running instance — it rewrites the unit/plist and explicitly restarts the service, so the new binary takes over immediately.
+
+**No required order relative to the `tetron` daemon or `tetron-webui`.** The IPC wire format (`tetron-proto`) is deliberately tolerant of version skew — every message field is `#[serde(default)]`, so an older systray talking to a newer daemon just doesn't see fields it doesn't know about yet, and a newer systray talking to an older daemon sees defaults for anything the daemon hasn't started sending. There is no version handshake and nothing to break by upgrading systray before, after, or independently of the daemon or webui. (This is a different, much more tolerant contract than the mesh peer-to-peer protocol between `tetron` daemons themselves, which is a hard ALPN version gate — see `tetron`'s own `AGENTS.md` if you're wondering why that one *does* need synchronized upgrades and this doesn't.)
+
+If a `tetron-proto` change actually adds a capability you want to use, you need the matching systray release built against it — check `tetron-systray`'s own releases page. Its version number tracks tetron core's current minor (e.g. systray `0.9.x` targets tetron `0.9`), so matching the daemon's minor version is a reasonable rule of thumb if you want to be sure you're not missing something, even though it isn't strictly required for things to keep working.
+
 ## Architecture
 
 ```
