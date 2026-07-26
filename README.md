@@ -70,6 +70,24 @@ tetron-systray install                                        # re-registers the
 
 If a `tetron-proto` change actually adds a capability you want to use, you need the matching systray release built against it — check `tetron-systray`'s own releases page. Its version number tracks tetron core's current minor (e.g. systray `0.9.x` targets tetron `0.9`), so matching the daemon's minor version is a reasonable rule of thumb if you want to be sure you're not missing something, even though it isn't strictly required for things to keep working.
 
+## Uninstalling
+
+**Via `tetron-webui`'s Add-ons panel:** click Uninstall — stops the service, removes the `systemd --user` unit / launchd LaunchAgent (and, on macOS, the `~/Applications/TetronSystray.app` bundle it wraps the binary in), *and* removes the installed binary itself. Full cleanup in one click.
+
+**Manual path:**
+
+```bash
+tetron-systray uninstall
+```
+
+Stops the service and removes the `systemd --user` unit (Linux) or launchd LaunchAgent + the `~/Applications/TetronSystray.app` bundle (macOS). **Deliberately leaves the binary itself in place** (wherever you installed it — `/usr/local/bin/tetron-systray` if you followed the manual install steps above): `uninstall` only knows how to tear down the service it registered, not delete its own currently-running executable. Remove it yourself if you want it fully gone:
+
+```bash
+sudo rm /usr/local/bin/tetron-systray
+```
+
+**Logs are also left in place**, on both platforms: Linux writes to the systemd user journal (`journalctl --user -u tetron-systray`), which isn't a file this project owns and ages out via your system's normal journal retention; macOS writes to `~/Library/Logs/tetron-systray.log`, a plain file you can delete by hand if you want.
+
 ## Architecture
 
 ```
