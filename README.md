@@ -12,17 +12,9 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Running it
 
-**Primary path: install from [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel.**
-Once webui is running (`http://127.0.0.1:7870`), its Add-ons panel detects,
-downloads, verifies, and installs `tetron-systray` in one click — no manual
-binary download, no `sudo`. Verified end to end on real hardware, both
-platforms: a fresh install correctly renders a working tray icon on Linux
-(GNOME) and macOS (a real M1 Mac), and re-installing over an
-already-running instance (e.g. to pick up an upgrade) cleanly restarts it
-rather than leaving the old binary in memory on either platform.
+**Primary path: install from [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel.** Once webui is running (`http://127.0.0.1:7870`), its Add-ons panel detects, downloads, verifies, and installs `tetron-systray` in one click — no manual binary download, no `sudo`. Verified end to end on real hardware, both platforms: a fresh install correctly renders a working tray icon on Linux (GNOME) and macOS (a real M1 Mac), and re-installing over an already-running instance (e.g. to pick up an upgrade) cleanly restarts it rather than leaving the old binary in memory on either platform.
 
-**Manual path: download a pre-built binary directly, no Rust toolchain
-needed.** Useful if you don't want to run `tetron-webui` at all.
+**Manual path: download a pre-built binary directly, no Rust toolchain needed.** Useful if you don't want to run `tetron-webui` at all.
 
 ```bash
 # First install tetron daemon if it is not yet installed.
