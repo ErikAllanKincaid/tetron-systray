@@ -1,5 +1,7 @@
 # tetron-systray
 
+![tetron-systray logo](images/tetron-systray.png)
+
 A menu-bar/tray status + quick-action client for [tetron](https://github.com/ErikAllanKincaid/tetron), a P2P mesh VPN. Talks to the existing `tetron` daemon over its Unix-socket IPC protocol — no daemon changes required.
 
 **Optional and separate from tetron on purpose**, same as [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui): tetron itself stays CLI-only by default; this is a genuinely separate, opt-in product for anyone who wants glanceable menu-bar status instead of (or alongside) the browser dashboard. Nothing about tetron's own behavior changes whether this exists or not.
@@ -23,13 +25,13 @@ rather than leaving the old binary in memory on either platform.
 needed.** Useful if you don't want to run `tetron-webui` at all.
 
 ```bash
-# First install tetron daemon.
+# First install tetron daemon if it is not yet installed.
 curl -Lo tetron https://github.com/ErikAllanKincaid/tetron/releases/latest/download/tetron-linux-x86_64
 chmod +x tetron
 sudo install tetron /usr/local/bin/tetron
 sudo tetron install
 
-# Linux x86_64 -- see the releases page for aarch64 / macOS binaries:
+# Linux x86_64, see the releases page for aarch64 / macOS binaries:
 # https://github.com/ErikAllanKincaid/tetron-systray/releases/latest
 curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
 chmod +x tetron-systray
