@@ -80,7 +80,7 @@ enum Command {
     Version,
 }
 
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
+const POLL_INTERVAL: Duration = Duration::from_secs(8);
 /// Cap on how many peer rows a single network's member submenu renders,
 /// per the function-scope doc's "handling large member counts" section.
 const MAX_MEMBER_ROWS: usize = 10;
