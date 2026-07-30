@@ -72,7 +72,13 @@ enum Command {
     /// Install and start the per-user service (systemd --user on Linux,
     /// a launchd LaunchAgent on macOS) so tetron-systray starts with your
     /// graphical session instead of needing to be run manually
-    Install,
+    Install {
+        /// Port tetron-webui listens on. Sets `TETRON_WEBUI_PORT` in the
+        /// service unit so the tray's "open webui" menu item opens the
+        /// correct URL.
+        #[arg(short = 'p', long, env = "TETRON_WEBUI_PORT", default_value_t = 7870u16)]
+        port: u16,
+    },
     /// Stop and remove the per-user service
     Uninstall,
     /// Print the tetron-systray version
@@ -84,7 +90,16 @@ const POLL_INTERVAL: Duration = Duration::from_secs(8);
 /// Cap on how many peer rows a single network's member submenu renders,
 /// per the function-scope doc's "handling large member counts" section.
 const MAX_MEMBER_ROWS: usize = 10;
-const WEBUI_URL: &str = "http://127.0.0.1:7870";
+/// Resolve the webui dashboard URL. Reads `TETRON_WEBUI_PORT` from the
+/// environment (same env var tetron-webui's own server and service install
+/// use); falls back to the default port 7870 if unset.
+fn webui_url() -> String {
+    let port = std::env::var("TETRON_WEBUI_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(7870u16);
+    format!("http://127.0.0.1:{port}")
+}
 
 /// A single member row's computed display data -- pure data derived from
 /// `NetworkStatus`, no menu-item objects.
@@ -295,10 +310,11 @@ fn clipboard_invite() -> Option<(iroh::EndpointId, Vec<u8>)> {
 }
 
 fn open_webui() {
+    let url = webui_url();
     #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(WEBUI_URL).spawn();
+    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(WEBUI_URL).spawn();
+    let _ = std::process::Command::new("open").arg(&url).spawn();
 }
 
 /// Compute the desired member-row data for a network: self, then every peer,
@@ -710,7 +726,7 @@ fn macos_pump_events(app: &objc2_app_kit::NSApplication) {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Install) => return service::install(),
+        Some(Command::Install { port }) => return service::install(port),
         Some(Command::Uninstall) => return service::uninstall(),
         Some(Command::Version) => {
             println!("tetron-systray {FULL_VERSION}");

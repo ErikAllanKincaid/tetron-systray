@@ -12,6 +12,11 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TETRON_WEBUI_PORT</key>
+        <string>__TETRON_WEBUI_PORT__</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>/tmp/tetron-systray.log</string>
     <key>StandardErrorPath</key>

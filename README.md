@@ -46,6 +46,22 @@ tetron-systray install     # sets up + starts a per-user service, no sudo needed
 
 Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). On macOS, `install` wraps the binary in a minimal `~/Applications/TetronSystray.app` bundle (a real `CFBundleIdentifier`/`LSUIElement` are required for the status item to appear in the menu bar at all -- a bare binary does not work) and drains `NSApplication`'s own event queue each tick so clicks actually open the menu, not just a bare Cocoa run-loop pump (see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)'s "Event loop" section for the full story).
 
+### Port configuration
+
+The "Open webui" menu item opens `http://127.0.0.1:7870` by default.
+Override the port by setting the `TETRON_WEBUI_PORT` environment variable
+(both tetron-webui and tetron-systray read the same var), or by passing
+`--port` when installing:
+
+```bash
+tetron-systray install --port 8080
+```
+
+If both webui and systray are installed as services, pass the same `--port`
+to each `install` command so both service units carry the variable. If you
+run either from a terminal, the variable is inherited from the shell
+environment automatically.
+
 ### Building from source / development
 
 ```bash

@@ -1,6 +1,6 @@
 [package]
 name = "tetron-systray"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 rust-version = "1.91"
 license = "MPL-2.0"
@@ -42,7 +42,7 @@ iroh = "1"
 # `install`/`uninstall` subcommands for the per-user service, and locating
 # ~/.config (Linux) / ~/Library (macOS) for the unit/plist. Same
 # crates/versions tetron-webui's own per-user service install uses.
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 dirs = "6.0.0"
 
 # Linux-only: tray-icon requires a real gtk event loop pumping on the

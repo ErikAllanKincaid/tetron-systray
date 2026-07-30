@@ -85,6 +85,9 @@ fn bundle_dir() -> Result<PathBuf> {
 /// use), enable it, and wait for the service manager to report it active
 /// before declaring success.
 ///
+/// The webui port is injected as `TETRON_WEBUI_PORT` so the tray's "open
+/// webui" menu item opens the correct URL when running as a service.
+///
 /// **Always forces a restart, not just enable/start.** Found live
 /// (2026-07-24, testing tetron-webui's addon-install framework): running
 /// `install` again to relocate/upgrade an *already-active* instance --
@@ -97,18 +100,20 @@ fn bundle_dir() -> Result<PathBuf> {
 /// current on-disk binary in memory. macOS's own `unload`+`load` cycle
 /// just below already had this property -- only Linux's `enable --now`
 /// needed the fix.
-pub fn install() -> Result<()> {
+pub fn install(port: u16) -> Result<()> {
     println!("installing tetron-systray {}", crate::FULL_VERSION);
     let exe = std::env::current_exe()
         .context("failed to determine current executable path")?
         .to_string_lossy()
         .into_owned();
+    let port_str = port.to_string();
 
     #[cfg(target_os = "linux")]
     {
         let path = unit_path()?;
         let unit = include_str!("../contrib/tetron-systray.service")
-            .replace("/usr/local/bin/tetron-systray", &exe);
+            .replace("/usr/local/bin/tetron-systray", &exe)
+            .replace("__TETRON_WEBUI_PORT__", &port_str);
         std::fs::write(&path, unit).with_context(|| format!("failed to write {}", path.display()))?;
         run_cmd("systemctl", &["--user", "daemon-reload"]);
         run_cmd("systemctl", &["--user", "enable", "tetron-systray"]);
@@ -136,7 +141,8 @@ pub fn install() -> Result<()> {
         let log = log_path()?.to_string_lossy().into_owned();
         let plist = include_str!("../contrib/com.tetron.systray.plist")
             .replace("/usr/local/bin/tetron-systray", &bundled_exe.to_string_lossy())
-            .replace("/tmp/tetron-systray.log", &log);
+            .replace("/tmp/tetron-systray.log", &log)
+            .replace("__TETRON_WEBUI_PORT__", &port_str);
         std::fs::write(&path, plist).with_context(|| format!("failed to write {}", path.display()))?;
         run_cmd_quiet("launchctl", &["unload", &path.to_string_lossy()]);
         run_cmd("launchctl", &["load", "-w", &path.to_string_lossy()]);
