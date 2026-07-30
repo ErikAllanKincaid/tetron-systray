@@ -58,7 +58,7 @@ use clap::{Parser, Subcommand};
 /// by `build.rs` (e.g. `0.8.4 (a1b2c3d4)`). The SHA distinguishes two builds
 /// that share the same, unbumped crate version -- same pattern as tetron
 /// core's own `FULL_VERSION`.
-const FULL_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_SHA"), ")");
+pub(crate) const FULL_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_SHA"), ")");
 
 #[derive(Parser)]
 #[command(name = "tetron-systray", version = FULL_VERSION)]

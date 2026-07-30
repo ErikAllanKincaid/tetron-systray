@@ -98,6 +98,7 @@ fn bundle_dir() -> Result<PathBuf> {
 /// just below already had this property -- only Linux's `enable --now`
 /// needed the fix.
 pub fn install() -> Result<()> {
+    println!("installing tetron-systray {}", crate::FULL_VERSION);
     let exe = std::env::current_exe()
         .context("failed to determine current executable path")?
         .to_string_lossy()
