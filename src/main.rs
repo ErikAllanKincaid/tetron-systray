@@ -86,6 +86,45 @@ const POLL_INTERVAL: Duration = Duration::from_secs(8);
 const MAX_MEMBER_ROWS: usize = 10;
 const WEBUI_URL: &str = "http://127.0.0.1:7870";
 
+/// A single member row's computed display data -- pure data derived from
+/// `NetworkStatus`, no menu-item objects.
+struct Row {
+    label: String,
+    ip: std::net::Ipv4Addr,
+    online: bool,
+}
+
+/// A member row tracked across poll iterations. The `MenuItem` is reused
+/// via `set_text` when the label changes, preserving its native-object
+/// identity so the click handler always resolves to the correct IP.
+struct MemberRow {
+    ip: std::net::Ipv4Addr,
+    item: tray_icon::menu::MenuItem,
+}
+
+/// Per-network state that persists beyond a single poll cycle, enabling
+/// in-place mutation of menu items instead of a whole-menu swap.
+struct NetworkUi {
+    /// Local display name (`NetworkStatus.network`) -- the stable key for
+    /// matching this UI entry against poll results.
+    key: String,
+    submenu: tray_icon::menu::Submenu,
+    members: Vec<MemberRow>,
+    more_item: Option<tray_icon::menu::MenuItem>,
+    active: bool,
+    toggle_item: tray_icon::menu::MenuItem,
+    is_coordinator: bool,
+    invite_item: Option<tray_icon::menu::MenuItem>,
+}
+
+/// Top-level UI state referenced by the §2 in-place-update paths. Built
+/// fresh alongside the native `Menu` on startup and on every §3 structural
+/// rebuild; mutated in-place the rest of the time.
+struct UiState {
+    status_item: tray_icon::menu::MenuItem,
+    network_uis: Vec<NetworkUi>,
+}
+
 /// What the poller hands back each cycle: either the daemon's full status,
 /// or "unreachable" (connect failed, or an unexpected reply).
 enum PollResult {
@@ -225,8 +264,21 @@ fn spawn_action(msg: IpcMessage) {
     });
 }
 
+/// Return a process-lifetime `Clipboard` instance. Keeping the underlying
+/// display connection open avoids withdrawing the selection between copies,
+/// which caused clipboard managers to fall back to stale content.
+fn clipboard() -> &'static std::sync::Mutex<arboard::Clipboard> {
+    use std::sync::OnceLock;
+    static CLIP: OnceLock<std::sync::Mutex<arboard::Clipboard>> = OnceLock::new();
+    CLIP.get_or_init(|| {
+        std::sync::Mutex::new(
+            arboard::Clipboard::new().expect("clipboard init failed (no X11 or Wayland?)"),
+        )
+    })
+}
+
 fn copy_to_clipboard(text: &str) {
-    if let Ok(mut cb) = arboard::Clipboard::new() {
+    if let Ok(mut cb) = clipboard().lock() {
         let _ = cb.set_text(text);
     }
 }
@@ -249,50 +301,184 @@ fn open_webui() {
     let _ = std::process::Command::new("open").arg(WEBUI_URL).spawn();
 }
 
-/// Build the member submenu for one network: every machine on it, self
-/// included -- one uniform, click-to-copy list rather than splitting self
-/// out into a separate "Copy my IP" item. Online first (an unreachable IP
-/// isn't worth a click), then alphabetical by hostname/IP for a stable
-/// order, capped at `MAX_MEMBER_ROWS` with the remainder folded into a
-/// single handoff row. Each row's id encodes the IPv4 to copy directly
-/// (`copy_member_ip:<ipv4>`) -- public information already rendered in the
-/// menu, safe to round-trip through a menu-item id.
-fn append_member_rows(submenu: &tray_icon::menu::Submenu, net: &NetworkStatus) -> anyhow::Result<()> {
-    struct Row {
-        label: String,
-        ip: std::net::Ipv4Addr,
-        online: bool,
-    }
-    let self_label = net.my_hostname.clone().unwrap_or_else(|| net.my_ip.to_string());
-    let mut rows: Vec<Row> = vec![Row { label: format!("{self_label} (you)"), ip: net.my_ip, online: true }];
-    rows.extend(net.peers.iter().map(|p| Row {
-        label: p.hostname.clone().unwrap_or_else(|| p.ip.to_string()),
-        ip: p.ip,
-        online: p.connection.is_some(),
+/// Compute the desired member-row data for a network: self, then every peer,
+/// online-first, then alphabetical by label. The `label` field includes the
+/// IP address and online/offline status -- the full display text.
+fn compute_desired_rows(net: &NetworkStatus) -> Vec<Row> {
+    let self_host = net.my_hostname.clone().unwrap_or_else(|| net.my_ip.to_string());
+    let mut rows: Vec<Row> = vec![Row {
+        label: format!("{}  {} (you)", self_host, net.my_ip),
+        ip: net.my_ip,
+        online: true,
+    }];
+    rows.extend(net.peers.iter().map(|p| {
+        let host = p.hostname.clone().unwrap_or_else(|| p.ip.to_string());
+        let status = if p.connection.is_some() { "" } else { " (offline)" };
+        Row {
+            label: format!("{}  {}{status}", host, p.ip),
+            ip: p.ip,
+            online: p.connection.is_some(),
+        }
     }));
     rows.sort_by(|a, b| (!a.online, &a.label).cmp(&(!b.online, &b.label)));
+    rows
+}
 
-    let shown = rows.len().min(MAX_MEMBER_ROWS);
-    for row in &rows[..shown] {
-        let status = if row.online { "" } else { " (offline)" };
-        let text = format!("{}  {}{status}", row.label, row.ip);
-        let item = MenuItem::with_id(format!("copy_member_ip:{}", row.ip), text, true, None);
-        submenu.append(&item)?;
+/// §2 in-place update of the daemon-wide status line at the top of the
+/// menu. Just `set_text` -- no structural change.
+fn update_status_item(item: &tray_icon::menu::MenuItem, reachable: bool, active: bool) {
+    let text = if !reachable {
+        "tetron: daemon unreachable".to_string()
+    } else if active {
+        "tetron: active".to_string()
+    } else {
+        "tetron: standby".to_string()
+    };
+    item.set_text(text);
+}
+
+/// §2 in-place reconciliation of one network's member rows. Never destroys
+/// a native widget whose IP is still in the desired set -- only `set_text`
+/// to update its label. This preserves the DBusMenu identity that the
+/// desktop panel uses for click routing.
+///
+/// Departures (IP no longer in desired) are removed. New members are
+/// appended after existing ones (before the separator/more-toggler).
+/// Reordering existing items would require destroy+recreate (muda's `remove`
+/// calls `unsafe { item.destroy() }` on the GTK widget), which breaks the
+/// panel's click-to-item mapping -- so we accept that existing items keep
+/// their current submenu position and only the label is refreshed.
+/// A §3 structural rebuild (network join/leave, reachability flip) will
+/// re-sort everything from scratch.
+fn update_network_members(net_ui: &mut NetworkUi, net: &NetworkStatus) -> anyhow::Result<()> {
+    let desired = compute_desired_rows(net);
+    let shown = desired.len().min(MAX_MEMBER_ROWS);
+
+    // Phase 1: remove departed members (back-to-front for stable indices).
+    let mut i = net_ui.members.len();
+    while i > 0 {
+        i -= 1;
+        if !desired[..shown].iter().any(|d| d.ip == net_ui.members[i].ip) {
+            net_ui.submenu.remove(&net_ui.members[i].item)?;
+            net_ui.members.remove(i);
+        }
     }
-    if rows.len() > shown {
-        let remaining = rows.len() - shown;
-        let more = MenuItem::new(format!("…and {remaining} more (open webui)"), false, None);
-        submenu.append(&more)?;
+
+    // Phase 2: update labels for existing members. No remove/insert --
+    // just set_text on the same native widget. Keeps the DBusMenu path
+    // stable so clicks always route to the correct IP.
+    for m in &net_ui.members {
+        if let Some(row) = desired[..shown].iter().find(|d| d.ip == m.ip) {
+            m.item.set_text(&row.label);
+        }
     }
+
+    // Phase 3: append new members before the separator.
+    // Position = current member count (right after the last existing
+    // member, before the more_item/separator).
+    for row in desired[..shown].iter() {
+        if !net_ui.members.iter().any(|m| m.ip == row.ip) {
+            let item = tray_icon::menu::MenuItem::with_id(
+                format!("copy_member_ip:{}", row.ip),
+                &row.label,
+                true,
+                None,
+            );
+            let pos = net_ui.members.len(); // before more_item/separator
+            net_ui.submenu.insert(&item, pos)?;
+            net_ui.members.push(MemberRow { ip: row.ip, item });
+        }
+    }
+
+    // Phase 4: "…and N more" trailer.
+    if desired.len() > shown {
+        let remaining = desired.len() - shown;
+        let more_text = format!("…and {remaining} more (open webui)");
+        match &net_ui.more_item {
+            Some(item) => item.set_text(&more_text),
+            None => {
+                let item = tray_icon::menu::MenuItem::new(more_text, false, None);
+                net_ui.submenu.insert(&item, net_ui.members.len())?;
+                net_ui.more_item = Some(item);
+            }
+        }
+    } else if let Some(item) = net_ui.more_item.take() {
+        net_ui.submenu.remove(&item)?;
+    }
+
     Ok(())
 }
 
-fn build_menu(
+/// §2 in-place update of per-network "chrome" (header text, toggle item,
+/// invite item). Called after `update_network_members` so member rows and
+/// positions are already reconciled.
+fn update_network_chrome(net_ui: &mut NetworkUi, net: &NetworkStatus) -> anyhow::Result<()> {
+    // Header text
+    let online = net.peers.iter().filter(|p| p.connection.is_some()).count();
+    let header = format!(
+        "{}  ({online}/{}){}",
+        net.network,
+        net.member_count,
+        if net.active { "" } else { "  ·standby·" }
+    );
+    net_ui.submenu.set_text(&header);
+
+    // Separator position = after members (+ more_item if present)
+    let sep_offset = net_ui.members.len() + if net_ui.more_item.is_some() { 1 } else { 0 };
+    // Toggle item: replaced on active flip (id is immutable -- must
+    // differ between resume/standby for the click handler).
+    if net.active != net_ui.active {
+        net_ui.submenu.remove(&net_ui.toggle_item)?;
+        let toggle_id = if net.active {
+            format!("standby:{}", net.network)
+        } else {
+            format!("resume:{}", net.network)
+        };
+        let toggle_text = if net.active {
+            format!("Standby \"{}\"", net.network)
+        } else {
+            format!("Resume \"{}\"", net.network)
+        };
+        let new_toggle = tray_icon::menu::MenuItem::with_id(toggle_id, toggle_text, true, None);
+        net_ui.submenu.insert(&new_toggle, sep_offset + 1)?;
+        net_ui.toggle_item = new_toggle;
+        net_ui.active = net.active;
+    }
+
+    // Invite item: added/removed when coordinator status flips.
+    let is_coord = net.role == tetron_proto::ipc::NetworkRole::Coordinator;
+    if is_coord && !net_ui.is_coordinator {
+        // Was not coordinator, now is -- add invite item.
+        let item = tray_icon::menu::MenuItem::with_id(
+            format!("copy_invite:{}", net.network),
+            "Copy invite key (mints a new one)",
+            true,
+            None,
+        );
+        net_ui.submenu.insert(&item, sep_offset + 2)?;
+        net_ui.invite_item = Some(item);
+        net_ui.is_coordinator = true;
+    } else if !is_coord && net_ui.is_coordinator {
+        // Was coordinator, now is not -- remove invite item.
+        if let Some(item) = net_ui.invite_item.take() {
+            net_ui.submenu.remove(&item)?;
+        }
+        net_ui.is_coordinator = false;
+    }
+
+    Ok(())
+}
+
+/// Build the full `Menu` + `UiState` from scratch. Used for the very first
+/// menu construction (via `TrayIconBuilder`) and for the rare §3 structural
+/// fallback. The returned `UiState` holds references into the menu's native
+/// objects so the §2 in-place update functions can mutate them later.
+fn build_menu_and_state(
     reachable: bool,
     active: bool,
     networks: &[NetworkStatus],
     pending_invite: Option<&(iroh::EndpointId, Vec<u8>)>,
-) -> anyhow::Result<Menu> {
+) -> anyhow::Result<(Menu, UiState)> {
     let menu = Menu::new();
 
     let status_text = if !reachable {
@@ -302,23 +488,54 @@ fn build_menu(
     } else {
         "tetron: standby".to_string()
     };
-    menu.append(&MenuItem::new(status_text, false, None))?;
+    let status_item = MenuItem::new(status_text, false, None);
+    menu.append(&status_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
 
     let joined_keys: HashSet<&str> =
         networks.iter().filter_map(|n| n.network_key.as_deref()).collect();
 
+    let mut network_uis = Vec::new();
+
     if reachable {
         for net in networks {
             let online = net.peers.iter().filter(|p| p.connection.is_some()).count();
             let header = format!(
-                "{}  ({online}/{} online){}",
+                "{}  ({online}/{}){}",
                 net.network,
                 net.member_count,
                 if net.active { "" } else { "  ·standby·" }
             );
             let sub = tray_icon::menu::Submenu::new(header, true);
-            append_member_rows(&sub, net)?;
+
+            // Member rows
+            let desired = compute_desired_rows(net);
+            let shown = desired.len().min(MAX_MEMBER_ROWS);
+            let mut members = Vec::with_capacity(shown);
+            for (i, row) in desired[..shown].iter().enumerate() {
+                let item = MenuItem::with_id(
+                    format!("copy_member_ip:{}", row.ip),
+                    &row.label,
+                    true,
+                    None,
+                );
+                sub.insert(&item, i)?; // insert at position i keeps order
+                members.push(MemberRow { ip: row.ip, item });
+            }
+
+            let more_item = if desired.len() > shown {
+                let remaining = desired.len() - shown;
+                let item = MenuItem::new(
+                    format!("…and {remaining} more (open webui)"),
+                    false,
+                    None,
+                );
+                sub.append(&item)?;
+                Some(item)
+            } else {
+                None
+            };
+
             sub.append(&PredefinedMenuItem::separator())?;
 
             let toggle_id = if net.active {
@@ -331,25 +548,41 @@ fn build_menu(
             } else {
                 format!("Resume \"{}\"", net.network)
             };
-            sub.append(&MenuItem::with_id(toggle_id, toggle_text, true, None))?;
-            if net.role == tetron_proto::ipc::NetworkRole::Coordinator {
-                sub.append(&MenuItem::with_id(
+            let toggle_item = MenuItem::with_id(toggle_id, toggle_text, true, None);
+            sub.append(&toggle_item)?;
+
+            let invite_item = if net.role == tetron_proto::ipc::NetworkRole::Coordinator {
+                let item = MenuItem::with_id(
                     format!("copy_invite:{}", net.network),
                     "Copy invite key (mints a new one)",
                     true,
                     None,
-                ))?;
-            }
+                );
+                sub.append(&item)?;
+                Some(item)
+            } else {
+                None
+            };
+
             menu.append(&sub)?;
+
+            network_uis.push(NetworkUi {
+                key: net.network.clone(),
+                submenu: sub,
+                members,
+                more_item,
+                active: net.active,
+                toggle_item,
+                is_coordinator: net.role == tetron_proto::ipc::NetworkRole::Coordinator,
+                invite_item,
+            });
         }
+
         if !networks.is_empty() {
             menu.append(&PredefinedMenuItem::separator())?;
         }
 
-        // Clipboard-detect join -- only shown if the code is valid AND not
-        // already a member of that network (self.networks.get equivalent:
-        // compare the decoded pubkey's string form against every joined
-        // network_key).
+        // Clipboard-detect join
         if let Some((pubkey, _)) = pending_invite {
             let key = pubkey.to_string();
             if !joined_keys.contains(key.as_str()) {
@@ -368,39 +601,28 @@ fn build_menu(
     }
 
     menu.append(&MenuItem::with_id("quit", "Quit", true, None))?;
-    Ok(menu)
+
+    Ok((menu, UiState { status_item, network_uis }))
 }
 
-/// A cheap comparable summary of exactly what `build_menu`/`icon_for`
-/// actually render -- used to skip redrawing the tray icon/menu when
-/// nothing rendered would actually differ. Rebuilding the native menu and
-/// swapping the icon on every 3s poll regardless of change caused a
-/// visible blink (found live-testing on a real desktop): the OS treats a
-/// `set_icon`/`set_menu` call as "this changed," even when the new one is
-/// pixel-identical to the old one. Deliberately excludes things that
-/// change every poll but aren't rendered (byte counters, RTT).
-fn render_fingerprint(
+/// Narrow fingerprint for §3 structural changes only -- a full menu rebuild
+/// is triggered when the SET of known networks changes, `reachable` flips,
+/// or `pending_invite` appears/disappears. Deliberately excludes per-row
+/// churn (online/offline, hostname changes, member count) -- those are
+/// handled by the §2 always-run in-place mutation path.
+///
+/// Uses network display names (`net.network`, always populated) rather than
+/// `network_key` (an `Option` that may be `None` for some daemon responses)
+/// for stable identity between polls.
+fn structural_fingerprint(
     reachable: bool,
-    active: bool,
     networks: &[NetworkStatus],
     pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>,
 ) -> String {
-    use std::fmt::Write;
-    let mut s = format!("{reachable}|{active}|");
-    for net in networks {
-        let _ = write!(s, "{}:{}:{}:{}:{};", net.network, net.active, net.member_count, net.my_ip, net.role);
-        for p in &net.peers {
-            let _ = write!(
-                s,
-                "{}:{}:{};",
-                p.hostname.as_deref().unwrap_or(""),
-                p.ip,
-                p.connection.is_some()
-            );
-        }
-    }
-    let _ = write!(s, "|{}", pending_invite.as_ref().map(|(k, _)| k.to_string()).unwrap_or_default());
-    s
+    let mut names: Vec<&str> = networks.iter().map(|n| n.network.as_str()).collect();
+    names.sort();
+    let fp = format!("{}|{}|{}", reachable, names.join(","), pending_invite.is_some());
+    fp
 }
 
 fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) {
@@ -507,10 +729,15 @@ fn main() -> anyhow::Result<()> {
     let mut active = false;
     let mut networks: Vec<NetworkStatus> = Vec::new();
     let mut pending_invite = clipboard_invite();
-    let mut last_fingerprint = render_fingerprint(reachable, active, &networks, &pending_invite);
+
+    // Initial build: create the full Menu + UiState together.
+    let (menu, mut ui_state) =
+        build_menu_and_state(reachable, active, &networks, pending_invite.as_ref())?;
+    let mut last_structural = structural_fingerprint(reachable, &networks, &pending_invite);
+    let mut last_icon_key = (reachable, active);
 
     let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(build_menu(reachable, active, &networks, pending_invite.as_ref())?))
+        .with_menu(Box::new(menu))
         .with_tooltip("tetron")
         .with_icon(icon_for(reachable, active))
         .build()?;
@@ -547,16 +774,47 @@ fn main() -> anyhow::Result<()> {
             }
             pending_invite = clipboard_invite();
 
-            let fingerprint = render_fingerprint(reachable, active, &networks, &pending_invite);
-            if fingerprint != last_fingerprint {
-                tray.set_icon(Some(icon_for(reachable, active)))?;
-                tray.set_menu(Some(Box::new(build_menu(
-                    reachable,
-                    active,
-                    &networks,
-                    pending_invite.as_ref(),
-                )?)));
-                last_fingerprint = fingerprint;
+            // §3: structural change → full rebuild of Menu + UiState.
+            let structural = structural_fingerprint(reachable, &networks, &pending_invite);
+            if structural != last_structural {
+                eprintln!("tetron-systray: structural change: '{last_structural}' -> '{structural}'");
+                match build_menu_and_state(reachable, active, &networks, pending_invite.as_ref()) {
+                    Ok((new_menu, new_ui)) => {
+                        tray.set_menu(Some(Box::new(new_menu)));
+                        ui_state = new_ui;
+                        last_structural = structural;
+                    }
+                    Err(e) => {
+                        eprintln!("tetron-systray: structural rebuild failed: {e}");
+                    }
+                }
+            }
+
+            // §2: always-run in-place update of text/state on existing
+            // menu items. Errors are logged, never propagated -- a single
+            // failed `remove`/`insert` must not crash the daemon.
+            update_status_item(&ui_state.status_item, reachable, active);
+            if reachable {
+                for net_ui in &mut ui_state.network_uis {
+                    if let Some(net) = networks.iter().find(|n| net_ui.key == n.network) {
+                        if let Err(e) = update_network_members(net_ui, net) {
+                            eprintln!("tetron-systray: update_network_members: {e}");
+                        }
+                        if let Err(e) = update_network_chrome(net_ui, net) {
+                            eprintln!("tetron-systray: update_network_chrome: {e}");
+                        }
+                    }
+                }
+            }
+
+            // Icon: separate simple guard to avoid OS blink on pixel-
+            // identical set_icon calls.
+            let icon_key = (reachable, active);
+            if icon_key != last_icon_key {
+                if let Err(e) = tray.set_icon(Some(icon_for(reachable, active))) {
+                    eprintln!("tetron-systray: set_icon failed: {e}");
+                }
+                last_icon_key = icon_key;
             }
         }
 
