@@ -3,17 +3,35 @@
   tetron-systray app icon: a green status dot with a capital "T" glyph.
   Reproduced from the tray icon's own generator (src/main.rs's solid_icon()/
   icon_for()) so this vector matches the raster tray icon exactly, geometry
-  and color both -- not a fresh redraw. Canvas, circle radius/center, and
+  and color both; not a fresh redraw. Canvas, circle radius/center, and
   glyph bar/stem coordinates are copied directly from those pixel constants
   (32x32 grid, center at 15.5,15.5, radius 12; stem half-width 1.75 spanning
   y 11..23; bar half-width 5.5 spanning y 8..11). Color is the "active"
-  state's green (#4CAF50, matches webui --status-active) with a white glyph,
-  the canonical resting state of the mark -- the tray icon also has grey
-  (standby) and red (unreachable) variants, not reproduced here since this
-  file is meant as the one reusable brand mark, not a state-swap set.
+  state's green (#4CAF50, matches the webui "status active" custom
+  property) with a white glyph, the canonical resting state of the mark;
+  the tray icon also has grey (standby) and red (unreachable) variants,
+  not reproduced here since this file is meant as the one reusable brand
+  mark, not a state-swap set.
+
+  Two fixes found reproducing this mark for tetron-mobile's own launcher
+  icon (2026-07-31): (1) a literal double-hyphen used as a dash, twice
+  above, made this comment invalid XML (strict parsers, e.g. Python's
+  defusedxml/cairosvg, reject it outright as "not well-formed"; browsers
+  and most renderers silently tolerate it, which is how this went
+  unnoticed); reworded throughout to avoid it, including the CSS custom
+  property name just above, which is spelled out in words instead of its
+  literal double-hyphen-prefixed form for the same reason. (2) the glyph
+  used to be two separately-filled rects (a bar and a stem) sharing a
+  nominally-exact edge at y=11; at small render sizes (confirmed at
+  26px/22px, real in-app icon sizes) the independent anti-aliasing on
+  each rect's edge left a visible thin green seam at the join, an
+  artifact of two separate fills rather than one. Replaced with a single
+  unified polygon tracing the same outline; a single fill has no internal
+  edge to seam. Pixel-diffed against the original two-rect version at
+  512px (where the seam isn't visible either way) to confirm this is a
+  pure anti-aliasing fix, not a shape change.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <circle cx="15.5" cy="15.5" r="12" fill="#4CAF50"/>
-  <rect x="10" y="8" width="11" height="3" fill="#FFFFFF"/>
-  <rect x="13.75" y="11" width="3.5" height="12" fill="#FFFFFF"/>
+  <polygon points="10,8 21,8 21,11 17.25,11 17.25,23 13.75,23 13.75,11 10,11" fill="#FFFFFF"/>
 </svg>
