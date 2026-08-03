@@ -662,6 +662,7 @@ fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) 
                 hostname: None,
                 transport: None,
                 invite: Some(secret.clone()),
+                force: false,
             });
         }
     } else if id == "open_webui" {
