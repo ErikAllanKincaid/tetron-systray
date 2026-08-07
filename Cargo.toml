@@ -26,19 +26,11 @@ anyhow = "1"
 # framework" decision already made for dropping the typed-join dialog
 # (see DO-NOT-COMMIT/IDEAS_Systray_V1_FunctionScope.md in the tetron repo).
 tray-icon = "0.19"
-# Clipboard read (join-via-clipboard-detect) and write (copy mesh IP /
-# invite key / member IP).
+# Clipboard write only (copy member IP). Invite mint/clipboard-detect join
+# (which also needed clipboard *read*, plus the `bs58`/`iroh` deps below)
+# were removed 2026-08-06 --
+# DO-NOT-COMMIT/PLAN_RemoveInviteMintAndClipboardJoin.md.
 arboard = "3"
-# Decodes an invite code (bs58(network_pubkey || secret)) client-side for
-# the clipboard-detect join check, same as tetron-webui's own copy of this
-# logic in its Cargo.toml (src/invite.rs isn't public from the tetron
-# binary crate, so this is reimplemented, not imported).
-bs58 = "0.5"
-# Needed directly for EndpointId (used decoding an invite code) -- version
-# must track tetron-proto's own pin so Cargo resolves both to the same
-# underlying type rather than two incompatible iroh versions. Same as
-# tetron-webui's own Cargo.toml comment.
-iroh = "1"
 # `install`/`uninstall` subcommands for the per-user service, and locating
 # ~/.config (Linux) / ~/Library (macOS) for the unit/plist. Same
 # crates/versions tetron-webui's own per-user service install uses.

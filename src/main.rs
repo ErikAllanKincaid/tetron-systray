@@ -7,11 +7,15 @@
 //! `DO-NOT-COMMIT/IDEAS_Systray_V1_FunctionScope.md`. Implemented here:
 //! per-network resume/standby toggle, a member list where every machine
 //! (self included, marked "(you)") is a uniform click-to-copy-IP row,
-//! copy-invite-key (mints a fresh one -- there is no IPC call that returns
-//! an *existing* invite's secret, only `InviteCreate`), clipboard-detect
-//! join, resume-all/standby-all, open-webui. Deliberately NOT implemented
+//! resume-all/standby-all, open-webui. Deliberately NOT implemented
 //! (non-destructive-only constraint, see the scope doc): leave, kick,
-//! nuke, admin add, invite revoke, typed invite entry.
+//! nuke, admin add, invite revoke, typed invite entry. Invite minting and
+//! clipboard-detect join were implemented in V1 and removed 2026-08-06
+//! (`DO-NOT-COMMIT/PLAN_RemoveInviteMintAndClipboardJoin.md`) -- both were
+//! arguably more consequential than several of the excluded actions above
+//! (mint grants network access, join changes this device's own
+//! membership), and clipboard-detect join was the only passive/
+//! background-triggered behavior in the app.
 //!
 //! Known simplification vs. the original scope sketch: member rows don't
 //! mark coordinators (no ★) -- `PeerStatus` carries no per-peer role, only
@@ -40,7 +44,6 @@
 //! those instead of a raw run-loop pump. See `macos_prepare_app`/
 //! `macos_pump_events`'s own doc comments for the exact API.
 
-use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -48,7 +51,6 @@ use tetron_proto::ipc::{IpcMessage, NetworkStatus};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 
-mod invite;
 mod ipc_client;
 mod service;
 
@@ -128,8 +130,6 @@ struct NetworkUi {
     more_item: Option<tray_icon::menu::MenuItem>,
     active: bool,
     toggle_item: tray_icon::menu::MenuItem,
-    is_coordinator: bool,
-    invite_item: Option<tray_icon::menu::MenuItem>,
 }
 
 /// Top-level UI state referenced by the §2 in-place-update paths. Built
@@ -266,12 +266,6 @@ fn spawn_action(msg: IpcMessage) {
             match ipc_client::call(msg).await {
                 Ok(IpcMessage::Ok { message }) => eprintln!("tetron-systray: {message}"),
                 Ok(IpcMessage::Error { message }) => eprintln!("tetron-systray: error: {message}"),
-                Ok(IpcMessage::InviteCreated { invite_key, .. }) => {
-                    if let Ok(mut cb) = arboard::Clipboard::new() {
-                        let _ = cb.set_text(invite_key);
-                        eprintln!("tetron-systray: invite key copied to clipboard");
-                    }
-                }
                 Ok(other) => eprintln!("tetron-systray: unexpected response: {other:?}"),
                 Err(e) => eprintln!("tetron-systray: {e}"),
             }
@@ -296,17 +290,6 @@ fn copy_to_clipboard(text: &str) {
     if let Ok(mut cb) = clipboard().lock() {
         let _ = cb.set_text(text);
     }
-}
-
-/// Check whether the current clipboard content decodes as a valid invite
-/// code -- the sole join mechanism (no typed-entry dialog, see the
-/// function-scope doc). Re-checked once per poll cycle rather than
-/// precisely "on menu open" (would need hooking the tray's own show-menu
-/// event); close enough at a 3s cadence.
-fn clipboard_invite() -> Option<(iroh::EndpointId, Vec<u8>)> {
-    let mut cb = arboard::Clipboard::new().ok()?;
-    let text = cb.get_text().ok()?;
-    invite::decode_invite_code(text.trim()).ok()
 }
 
 fn open_webui() {
@@ -461,27 +444,6 @@ fn update_network_chrome(net_ui: &mut NetworkUi, net: &NetworkStatus) -> anyhow:
         net_ui.active = net.active;
     }
 
-    // Invite item: added/removed when coordinator status flips.
-    let is_coord = net.role == tetron_proto::ipc::NetworkRole::Coordinator;
-    if is_coord && !net_ui.is_coordinator {
-        // Was not coordinator, now is -- add invite item.
-        let item = tray_icon::menu::MenuItem::with_id(
-            format!("copy_invite:{}", net.network),
-            "Copy invite key (mints a new one)",
-            true,
-            None,
-        );
-        net_ui.submenu.insert(&item, sep_offset + 2)?;
-        net_ui.invite_item = Some(item);
-        net_ui.is_coordinator = true;
-    } else if !is_coord && net_ui.is_coordinator {
-        // Was coordinator, now is not -- remove invite item.
-        if let Some(item) = net_ui.invite_item.take() {
-            net_ui.submenu.remove(&item)?;
-        }
-        net_ui.is_coordinator = false;
-    }
-
     Ok(())
 }
 
@@ -493,7 +455,6 @@ fn build_menu_and_state(
     reachable: bool,
     active: bool,
     networks: &[NetworkStatus],
-    pending_invite: Option<&(iroh::EndpointId, Vec<u8>)>,
 ) -> anyhow::Result<(Menu, UiState)> {
     let menu = Menu::new();
 
@@ -507,9 +468,6 @@ fn build_menu_and_state(
     let status_item = MenuItem::new(status_text, false, None);
     menu.append(&status_item)?;
     menu.append(&PredefinedMenuItem::separator())?;
-
-    let joined_keys: HashSet<&str> =
-        networks.iter().filter_map(|n| n.network_key.as_deref()).collect();
 
     let mut network_uis = Vec::new();
 
@@ -567,19 +525,6 @@ fn build_menu_and_state(
             let toggle_item = MenuItem::with_id(toggle_id, toggle_text, true, None);
             sub.append(&toggle_item)?;
 
-            let invite_item = if net.role == tetron_proto::ipc::NetworkRole::Coordinator {
-                let item = MenuItem::with_id(
-                    format!("copy_invite:{}", net.network),
-                    "Copy invite key (mints a new one)",
-                    true,
-                    None,
-                );
-                sub.append(&item)?;
-                Some(item)
-            } else {
-                None
-            };
-
             menu.append(&sub)?;
 
             network_uis.push(NetworkUi {
@@ -589,24 +534,11 @@ fn build_menu_and_state(
                 more_item,
                 active: net.active,
                 toggle_item,
-                is_coordinator: net.role == tetron_proto::ipc::NetworkRole::Coordinator,
-                invite_item,
             });
         }
 
         if !networks.is_empty() {
             menu.append(&PredefinedMenuItem::separator())?;
-        }
-
-        // Clipboard-detect join
-        if let Some((pubkey, _)) = pending_invite {
-            let key = pubkey.to_string();
-            if !joined_keys.contains(key.as_str()) {
-                let short: String = key.chars().take(8).collect();
-                let text = format!("Join network {short}…");
-                menu.append(&MenuItem::with_id("join", text, true, None))?;
-                menu.append(&PredefinedMenuItem::separator())?;
-            }
         }
 
         menu.append(&MenuItem::with_id("resume_all", "Resume all", true, None))?;
@@ -622,26 +554,21 @@ fn build_menu_and_state(
 }
 
 /// Narrow fingerprint for §3 structural changes only -- a full menu rebuild
-/// is triggered when the SET of known networks changes, `reachable` flips,
-/// or `pending_invite` appears/disappears. Deliberately excludes per-row
-/// churn (online/offline, hostname changes, member count) -- those are
-/// handled by the §2 always-run in-place mutation path.
+/// is triggered when the SET of known networks changes or `reachable`
+/// flips. Deliberately excludes per-row churn (online/offline, hostname
+/// changes, member count) -- those are handled by the §2 always-run
+/// in-place mutation path.
 ///
 /// Uses network display names (`net.network`, always populated) rather than
 /// `network_key` (an `Option` that may be `None` for some daemon responses)
 /// for stable identity between polls.
-fn structural_fingerprint(
-    reachable: bool,
-    networks: &[NetworkStatus],
-    pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>,
-) -> String {
+fn structural_fingerprint(reachable: bool, networks: &[NetworkStatus]) -> String {
     let mut names: Vec<&str> = networks.iter().map(|n| n.network.as_str()).collect();
     names.sort();
-    let fp = format!("{}|{}|{}", reachable, names.join(","), pending_invite.is_some());
-    fp
+    format!("{}|{}", reachable, names.join(","))
 }
 
-fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) {
+fn handle_click(id: &str) {
     if let Some(net) = id.strip_prefix("resume:") {
         spawn_action(IpcMessage::Resume { hostname: None, network: Some(net.to_string()) });
     } else if let Some(net) = id.strip_prefix("standby:") {
@@ -652,19 +579,6 @@ fn handle_click(id: &str, pending_invite: &Option<(iroh::EndpointId, Vec<u8>)>) 
         spawn_action(IpcMessage::Standby { network: None });
     } else if let Some(ip) = id.strip_prefix("copy_member_ip:") {
         copy_to_clipboard(ip);
-    } else if let Some(net) = id.strip_prefix("copy_invite:") {
-        spawn_action(IpcMessage::InviteCreate { network: net.to_string(), expires: None });
-    } else if id == "join" {
-        if let Some((pubkey, secret)) = pending_invite {
-            spawn_action(IpcMessage::Join {
-                network_key: pubkey.to_string(),
-                alias: None,
-                hostname: None,
-                transport: None,
-                invite: Some(secret.clone()),
-                force: false,
-            });
-        }
     } else if id == "open_webui" {
         open_webui();
     }
@@ -745,12 +659,10 @@ fn main() -> anyhow::Result<()> {
     let mut reachable = false;
     let mut active = false;
     let mut networks: Vec<NetworkStatus> = Vec::new();
-    let mut pending_invite = clipboard_invite();
 
     // Initial build: create the full Menu + UiState together.
-    let (menu, mut ui_state) =
-        build_menu_and_state(reachable, active, &networks, pending_invite.as_ref())?;
-    let mut last_structural = structural_fingerprint(reachable, &networks, &pending_invite);
+    let (menu, mut ui_state) = build_menu_and_state(reachable, active, &networks)?;
+    let mut last_structural = structural_fingerprint(reachable, &networks);
     let mut last_icon_key = (reachable, active);
 
     let tray = TrayIconBuilder::new()
@@ -789,13 +701,11 @@ fn main() -> anyhow::Result<()> {
                     networks.clear();
                 }
             }
-            pending_invite = clipboard_invite();
-
             // §3: structural change → full rebuild of Menu + UiState.
-            let structural = structural_fingerprint(reachable, &networks, &pending_invite);
+            let structural = structural_fingerprint(reachable, &networks);
             if structural != last_structural {
                 eprintln!("tetron-systray: structural change: '{last_structural}' -> '{structural}'");
-                match build_menu_and_state(reachable, active, &networks, pending_invite.as_ref()) {
+                match build_menu_and_state(reachable, active, &networks) {
                     Ok((new_menu, new_ui)) => {
                         tray.set_menu(Some(Box::new(new_menu)));
                         ui_state = new_ui;
@@ -839,7 +749,7 @@ fn main() -> anyhow::Result<()> {
             if event.id.0 == "quit" {
                 break;
             }
-            handle_click(&event.id.0, &pending_invite);
+            handle_click(&event.id.0);
         }
 
         if let Ok(_event) = tray_events.try_recv() {
