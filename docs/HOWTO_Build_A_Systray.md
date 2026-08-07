@@ -265,9 +265,12 @@ toolchain (Cocoa APIs via `objc2`).
 ## Status of this repo (honest, as of this writing)
 
 The v1 function list is implemented: per-network resume/standby toggle, a
-member list (self included) with click-to-copy IPs, copy-invite-key,
-clipboard-detect join, resume-all/standby-all, and an open-webui launcher.
-Service-level correctness is live-tested on real hardware on both
+member list (self included) with click-to-copy IPs, resume-all/standby-all,
+and an open-webui launcher. Invite minting and clipboard-detect join were
+also part of v1 but removed 2026-08-06
+(`DO-NOT-COMMIT/PLAN_RemoveInviteMintAndClipboardJoin.md`) -- both are
+still available through `tetron-webui`. Service-level correctness is
+live-tested on real hardware on both
 platforms: Linux (install/uninstall, crash recovery, correct multi-desktop
 `systemd --user` targeting) and, since 2026-07-24, macOS (a real M1 Mac,
 macOS 26) — icon rendering, click-to-open-menu, `install`/`uninstall`
