@@ -24,9 +24,7 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Running it
 
-**Primary path: install from [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel.** Once webui is running (`http://127.0.0.1:7870`), its Add-ons panel detects, downloads, verifies, and installs `tetron-systray` in one click — no manual binary download, no `sudo`. Verified end to end on real hardware, both platforms: a fresh install correctly renders a working tray icon on Linux (GNOME) and macOS (a real M1 Mac), and re-installing over an already-running instance (e.g. to pick up an upgrade) cleanly restarts it rather than leaving the old binary in memory on either platform.
-
-**Manual path: download a pre-built binary directly, no Rust toolchain needed.** Useful if you don't want to run `tetron-webui` at all.
+**Primary path: download a pre-built binary directly, no Rust toolchain needed.**
 
 ```bash
 # First install tetron daemon if it is not yet installed.
@@ -43,6 +41,10 @@ sudo install tetron-systray /usr/local/bin/tetron-systray
 
 tetron-systray install     # sets up + starts a per-user service, no sudo needed
 ```
+
+Or install/upgrade tetron, tetron-webui, and tetron-systray together with [`contrib/install-tetron-suite.sh`](https://github.com/ErikAllanKincaid/tetron/blob/main/contrib/install-tetron-suite.sh) from the tetron repo — it's an extra, helpful wrapper around the same steps above, not a replacement for them.
+
+**Via [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel:** once webui is running, its Add-ons panel shows whether systray is installed and can uninstall it, but can't install it directly — `tetron-systray` installs to root-owned `/usr/local/bin`, same as `tetron`/`tetron-webui`, and webui runs unprivileged. Clicking Install there shows the `install-tetron-suite.sh` command above to run yourself.
 
 Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). On macOS, `install` wraps the binary in a minimal `~/Applications/TetronSystray.app` bundle (a real `CFBundleIdentifier`/`LSUIElement` are required for the status item to appear in the menu bar at all -- a bare binary does not work) and drains `NSApplication`'s own event queue each tick so clicks actually open the menu, not just a bare Cocoa run-loop pump (see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)'s "Event loop" section for the full story).
 
@@ -75,9 +77,7 @@ Only needed if you're changing the code, or a pre-built binary isn't published f
 
 ## Upgrading
 
-**Via `tetron-webui`'s Add-ons panel:** installing over an already-running `tetron-systray` (the same button used for the initial install) fetches the latest release and cleanly restarts the service on the new binary — verified end to end on both platforms.
-
-**Manual path:** re-run the same install steps with a fresh binary:
+Re-run the same install steps with a fresh binary (or the `install-tetron-suite.sh` one-liner, which only touches what's behind):
 
 ```bash
 curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
@@ -94,7 +94,7 @@ If a `tetron-proto` change actually adds a capability you want to use, you need 
 
 ## Uninstalling
 
-**Via `tetron-webui`'s Add-ons panel:** click Uninstall — stops the service, removes the `systemd --user` unit / launchd LaunchAgent (and, on macOS, the `~/Applications/TetronSystray.app` bundle it wraps the binary in), *and* removes the installed binary itself. Full cleanup in one click.
+**Via `tetron-webui`'s Add-ons panel:** click Uninstall — stops the service and removes the `systemd --user` unit / launchd LaunchAgent (and, on macOS, the `~/Applications/TetronSystray.app` bundle it wraps the binary in). The binary itself is root-owned (`/usr/local/bin`), so webui can't delete it for you — remove it yourself the same way as the manual path below.
 
 **Manual path:**
 
