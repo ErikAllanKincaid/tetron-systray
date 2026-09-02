@@ -20,7 +20,7 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 | **macOS app bundle** | `~/Applications/TetronSystray.app` |
 | **Linux logs** | systemd user journal (`journalctl --user -u tetron-systray`) |
 | **macOS logs** | `~/Library/Logs/tetron-systray.log` |
-| **Config** | None — everything comes via IPC from the tetron daemon |
+| **Config** | None persisted — state comes via IPC from the tetron daemon; a few optional env vars tune the webui port and polling cadence (below) |
 
 ## Running it
 
@@ -63,6 +63,31 @@ If both webui and systray are installed as services, pass the same `--port`
 to each `install` command so both service units carry the variable. If you
 run either from a terminal, the variable is inherited from the shell
 environment automatically.
+
+### Polling cadence
+
+The tray polls the daemon over IPC for status. It polls fast only while
+its menu is open or was just interacted with, and drops to a slow
+heartbeat otherwise — enough to keep the icon colour honest and to notice
+the daemon going away, without the constant background churn a flat
+interval causes. On macOS the "menu is open" signal is exact; on Linux the
+appindicator backend exposes no such signal, so opening the menu without
+clicking anything may show data up to one idle interval stale (the
+heartbeat bounds it).
+
+Four environment variables tune it (whole seconds; a bad or zero value
+keeps the default):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TETRON_SYSTRAY_POLL_ACTIVE_SECS` | `3` | Interval while the menu is open / just used |
+| `TETRON_SYSTRAY_POLL_IDLE_SECS` | `300` | Heartbeat when the menu is closed and the daemon is reachable |
+| `TETRON_SYSTRAY_POLL_UNREACHABLE_SECS` | `30` | Heartbeat while the daemon is unreachable (so recovery shows without a click) |
+| `TETRON_SYSTRAY_MENU_ACTIVE_WINDOW_SECS` | `20` | How long the fast cadence lasts after the last interaction |
+
+Set them the same way as `TETRON_WEBUI_PORT`: in the shell environment for
+a manual run, or as `Environment=` lines in the service unit / plist
+(commented examples are in [`contrib/tetron-systray.service`](contrib/tetron-systray.service)).
 
 ### Building from source / development
 

@@ -17,7 +17,7 @@ path = "src/main.rs"
 # which *binaries* are running together, and tetron-proto's wire types
 # already use #[serde(default)] consistently for exactly that reason.
 tetron-proto = { git = "https://github.com/ErikAllanKincaid/tetron" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 anyhow = "1"
 # Tray icon + native menu. Re-exports muda for menu construction, so no
 # separate menu crate is needed. Runs with a manual polling event loop

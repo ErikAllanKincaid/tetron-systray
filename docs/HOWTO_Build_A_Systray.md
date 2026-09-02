@@ -181,6 +181,24 @@ daemon restart is never something this has to specially detect and
 recover from — the next poll just reconnects fresh. Real example:
 [`src/ipc_client.rs`](../src/ipc_client.rs).
 
+**Don't poll on a flat interval forever.** A tray icon nobody is looking
+at still costs the daemon a request every cycle; a flat 8s was ~450
+requests/hour/machine unconditionally, the single largest source of steady
+daemon work. The current design makes `POLL_INTERVAL` a variable the GUI
+thread drives over a second channel (`PollCmd::{Now, SetInterval}`): poll
+fast (a few seconds) only while the menu is open or was just interacted
+with, and drop to a slow heartbeat (minutes) otherwise — still frequent
+enough to keep the icon colour honest and to notice the daemon going away.
+The "menu is open now" signal differs by platform: macOS delivers real
+`TrayIconEvent::{Click,Enter}`; the Linux appindicator/gtk backend
+delivers no tray events at all, so the gtk `show` signal on the
+muda-owned `GtkMenu` (`ContextMenu::gtk_context_menu()`) is used instead —
+best-effort, with the heartbeat as the guaranteed floor. All four cadence
+values are env-tunable (`TETRON_SYSTRAY_POLL_ACTIVE_SECS`,
+`TETRON_SYSTRAY_POLL_IDLE_SECS`, `TETRON_SYSTRAY_POLL_UNREACHABLE_SECS`,
+`TETRON_SYSTRAY_MENU_ACTIVE_WINDOW_SECS`). Real example:
+[`src/main.rs`](../src/main.rs)'s `PollConfig`/`spawn_status_poller`.
+
 ## 5. Deploying it: a per-user service, correctly targeted across desktops
 
 Same reasoning as any local client tool: most people running this
