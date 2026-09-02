@@ -18,6 +18,12 @@ After=graphical-session.target
 [Service]
 Type=simple
 Environment=TETRON_WEBUI_PORT=__TETRON_WEBUI_PORT__
+# Polling cadence (whole seconds). Uncomment and tune to taste; the values
+# shown are the built-in defaults. See the README's "Polling cadence" section.
+# Environment=TETRON_SYSTRAY_POLL_ACTIVE_SECS=3
+# Environment=TETRON_SYSTRAY_POLL_IDLE_SECS=300
+# Environment=TETRON_SYSTRAY_POLL_UNREACHABLE_SECS=30
+# Environment=TETRON_SYSTRAY_MENU_ACTIVE_WINDOW_SECS=20
 ExecStart=/usr/local/bin/tetron-systray
 Restart=on-failure
 RestartSec=5

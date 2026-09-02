@@ -45,7 +45,12 @@
 //! `macos_pump_events`'s own doc comments for the exact API.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+#[cfg(target_os = "linux")]
+use std::cell::Cell;
+#[cfg(target_os = "linux")]
+use std::rc::Rc;
 
 use tetron_proto::ipc::{IpcMessage, NetworkStatus};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
@@ -88,7 +93,62 @@ enum Command {
     Version,
 }
 
-const POLL_INTERVAL: Duration = Duration::from_secs(8);
+/// Polling cadence, env-tunable. The daemon is polled over IPC for status;
+/// a flat 8s interval (the pre-2026-09 behavior) was ~450 requests/hour per
+/// machine unconditionally -- the single largest source of steady daemon
+/// work even while nobody is looking at the tray. Now the tray polls fast
+/// only while its menu is open or was just interacted with, and falls back
+/// to a slow heartbeat otherwise: enough to keep the icon colour honest and
+/// to notice the daemon going away, without the constant churn.
+///
+/// Env overrides (whole seconds, must parse and be > 0 or the default is
+/// kept): `TETRON_SYSTRAY_POLL_ACTIVE_SECS` (3),
+/// `TETRON_SYSTRAY_POLL_IDLE_SECS` (300),
+/// `TETRON_SYSTRAY_POLL_UNREACHABLE_SECS` (30),
+/// `TETRON_SYSTRAY_MENU_ACTIVE_WINDOW_SECS` (20).
+struct PollConfig {
+    /// While the menu is open / just interacted with.
+    active: Duration,
+    /// Steady-state heartbeat: menu closed, daemon reachable.
+    idle: Duration,
+    /// Heartbeat while the daemon is unreachable, so recovery shows without
+    /// needing a click.
+    unreachable: Duration,
+    /// How long the `active` cadence persists after the last menu-open /
+    /// interaction signal.
+    active_window: Duration,
+}
+
+impl PollConfig {
+    fn from_env() -> Self {
+        fn secs(key: &str, default: u64) -> Duration {
+            let n = std::env::var(key)
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(default);
+            Duration::from_secs(n)
+        }
+        Self {
+            active: secs("TETRON_SYSTRAY_POLL_ACTIVE_SECS", 3),
+            idle: secs("TETRON_SYSTRAY_POLL_IDLE_SECS", 300),
+            unreachable: secs("TETRON_SYSTRAY_POLL_UNREACHABLE_SECS", 30),
+            active_window: secs("TETRON_SYSTRAY_MENU_ACTIVE_WINDOW_SECS", 20),
+        }
+    }
+}
+
+/// Which cadence the poller should be on given current conditions.
+fn desired_interval(active_until: Option<Instant>, reachable: bool, cfg: &PollConfig) -> Duration {
+    if active_until.is_some_and(|t| Instant::now() < t) {
+        cfg.active
+    } else if !reachable {
+        cfg.unreachable
+    } else {
+        cfg.idle
+    }
+}
+
 /// Cap on how many peer rows a single network's member submenu renders,
 /// per the function-scope doc's "handling large member counts" section.
 const MAX_MEMBER_ROWS: usize = 10;
@@ -145,6 +205,14 @@ struct UiState {
 enum PollResult {
     Reachable { active: bool, networks: Vec<NetworkStatus> },
     Unreachable,
+}
+
+/// A command from the GUI thread to the status poller.
+enum PollCmd {
+    /// Poll immediately, cutting the current wait short.
+    Now,
+    /// Use this interval for subsequent waits (re-arms the current one too).
+    SetInterval(Duration),
 }
 
 /// A filled circle on a transparent background -- a status *dot*, not a
@@ -223,16 +291,23 @@ fn icon_for(reachable: bool, active: bool) -> Icon {
     }
 }
 
-/// Poll `Status` on a fixed interval, forwarding the result over `tx`. Runs
-/// its own tokio runtime on a dedicated thread so the tray-icon-owning main
-/// thread stays free to pump the platform event loop.
-fn spawn_status_poller(tx: mpsc::Sender<PollResult>) {
+/// Poll `Status` and forward each result over `tx`. Cadence is driven by the
+/// GUI thread over `cmd_rx` (`SetInterval` to change it, `Now` to poll at
+/// once). Runs its own current-thread tokio runtime on a dedicated OS thread
+/// so the tray-icon-owning main thread stays free to pump the platform event
+/// loop.
+fn spawn_status_poller(
+    tx: mpsc::Sender<PollResult>,
+    mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<PollCmd>,
+    initial_interval: Duration,
+) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("failed to build tokio runtime for status poller");
         rt.block_on(async move {
+            let mut interval = initial_interval;
             loop {
                 let result = match ipc_client::call(IpcMessage::Status).await {
                     Ok(IpcMessage::StatusResponse { active, networks, .. }) => {
@@ -243,10 +318,44 @@ fn spawn_status_poller(tx: mpsc::Sender<PollResult>) {
                 if tx.send(result).is_err() {
                     return; // main thread gone
                 }
-                tokio::time::sleep(POLL_INTERVAL).await;
+
+                // Wait out `interval`, unless the GUI thread interrupts:
+                // `Now` ends the wait early; `SetInterval` re-arms it at the
+                // new cadence so an idle->active switch is felt immediately,
+                // not only after the old (possibly long) sleep expires.
+                let sleep = tokio::time::sleep(interval);
+                tokio::pin!(sleep);
+                loop {
+                    tokio::select! {
+                        () = &mut sleep => break,
+                        cmd = cmd_rx.recv() => match cmd {
+                            None => return, // GUI thread gone
+                            Some(PollCmd::Now) => break,
+                            Some(PollCmd::SetInterval(d)) => {
+                                interval = d;
+                                sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                            }
+                        },
+                    }
+                }
             }
         });
     });
+}
+
+/// Linux only: hook the gtk "show" signal on the muda-owned `GtkMenu` so the
+/// GUI loop learns when the menu opens. `flag` is set true on show; the loop
+/// polls and clears it. `gtk_context_menu()` returns the same cached
+/// `GtkMenu` on every call and the handler is owned by that long-lived
+/// GObject, so nothing here has to be kept alive by the caller. Best-effort:
+/// whether the signal actually fires through the appindicator/dbusmenu
+/// bridge varies by desktop panel -- the idle heartbeat is the floor either
+/// way.
+#[cfg(target_os = "linux")]
+fn connect_menu_show(menu: &Menu, flag: Rc<Cell<bool>>) {
+    use gtk::prelude::WidgetExt;
+    use tray_icon::menu::ContextMenu;
+    menu.gtk_context_menu().connect_show(move |_| flag.set(true));
 }
 
 /// Fire-and-forget an IPC action on its own short-lived thread + one-shot
@@ -665,14 +774,29 @@ fn main() -> anyhow::Result<()> {
     let mut last_structural = structural_fingerprint(reachable, &networks);
     let mut last_icon_key = (reachable, active);
 
+    // Linux: the appindicator/gtk backend emits no click or tray events, so
+    // the gtk "show" signal on the muda-owned GtkMenu is the only available
+    // "the user is looking at the menu now" hook. Set on show, drained by
+    // the loop below.
+    #[cfg(target_os = "linux")]
+    let menu_shown = Rc::new(Cell::new(false));
+    #[cfg(target_os = "linux")]
+    connect_menu_show(&menu, menu_shown.clone());
+
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("tetron")
         .with_icon(icon_for(reachable, active))
         .build()?;
 
+    let poll_cfg = PollConfig::from_env();
     let (status_tx, status_rx) = mpsc::channel();
-    spawn_status_poller(status_tx);
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<PollCmd>();
+    spawn_status_poller(status_tx, cmd_rx, poll_cfg.idle);
+    // When set, the poller is kept on the fast `active` cadence until this
+    // instant passes; each menu-open / interaction pushes it forward.
+    let mut active_until: Option<Instant> = None;
+    let mut last_sent_interval = poll_cfg.idle;
 
     let menu_events = MenuEvent::receiver();
     let tray_events = TrayIconEvent::receiver();
@@ -681,6 +805,14 @@ fn main() -> anyhow::Result<()> {
         #[cfg(target_os = "linux")]
         while gtk::events_pending() {
             gtk::main_iteration_do(false);
+        }
+
+        // Linux: the gtk menu just opened -- refresh now and hold the fast
+        // cadence for a while so the open menu stays current.
+        #[cfg(target_os = "linux")]
+        if menu_shown.replace(false) {
+            active_until = Some(Instant::now() + poll_cfg.active_window);
+            let _ = cmd_tx.send(PollCmd::Now);
         }
 
         // macOS: drain NSApplication's own event queue, mirroring the gtk
@@ -707,6 +839,8 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("tetron-systray: structural change: '{last_structural}' -> '{structural}'");
                 match build_menu_and_state(reachable, active, &networks) {
                     Ok((new_menu, new_ui)) => {
+                        #[cfg(target_os = "linux")]
+                        connect_menu_show(&new_menu, menu_shown.clone());
                         tray.set_menu(Some(Box::new(new_menu)));
                         ui_state = new_ui;
                         last_structural = structural;
@@ -750,14 +884,88 @@ fn main() -> anyhow::Result<()> {
                 break;
             }
             handle_click(&event.id.0);
+            // A menu item was clicked: the menu is open, and daemon state
+            // may have just changed (resume/standby) -- refresh promptly and
+            // stay on the fast cadence briefly.
+            active_until = Some(Instant::now() + poll_cfg.active_window);
+            let _ = cmd_tx.send(PollCmd::Now);
         }
 
-        if let Ok(_event) = tray_events.try_recv() {
-            // Left click already opens the menu natively; no separate action.
+        // macOS delivers Click/Enter/Move/Leave here (the gtk backend
+        // delivers nothing -- Linux uses the menu "show" signal above). A
+        // real click or hover means the menu is open or about to be.
+        while let Ok(event) = tray_events.try_recv() {
+            use tray_icon::TrayIconEvent as T;
+            if matches!(
+                event,
+                T::Click { .. } | T::DoubleClick { .. } | T::Enter { .. }
+            ) {
+                active_until = Some(Instant::now() + poll_cfg.active_window);
+                let _ = cmd_tx.send(PollCmd::Now);
+            }
+        }
+
+        // Keep the poller on whichever cadence current conditions call for.
+        let want = desired_interval(active_until, reachable, &poll_cfg);
+        if want != last_sent_interval {
+            let _ = cmd_tx.send(PollCmd::SetInterval(want));
+            last_sent_interval = want;
         }
 
         std::thread::sleep(Duration::from_millis(50));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> PollConfig {
+        PollConfig {
+            active: Duration::from_secs(3),
+            idle: Duration::from_secs(300),
+            unreachable: Duration::from_secs(30),
+            active_window: Duration::from_secs(20),
+        }
+    }
+
+    #[test]
+    fn active_window_in_future_wins_over_everything() {
+        let c = cfg();
+        let soon = Some(Instant::now() + Duration::from_secs(10));
+        assert_eq!(desired_interval(soon, true, &c), c.active);
+        assert_eq!(desired_interval(soon, false, &c), c.active);
+    }
+
+    #[test]
+    fn expired_or_absent_active_window_falls_back_to_reachability() {
+        let c = cfg();
+        let past = Some(Instant::now() - Duration::from_secs(1));
+        assert_eq!(desired_interval(past, true, &c), c.idle);
+        assert_eq!(desired_interval(None, true, &c), c.idle);
+        assert_eq!(desired_interval(past, false, &c), c.unreachable);
+        assert_eq!(desired_interval(None, false, &c), c.unreachable);
+    }
+
+    #[test]
+    fn from_env_rejects_zero_and_garbage_keeps_default() {
+        // Serialize the env mutation; other tests here don't touch env, but
+        // be explicit that these keys are process-global.
+        unsafe {
+            std::env::set_var("TETRON_SYSTRAY_POLL_ACTIVE_SECS", "0");
+            std::env::set_var("TETRON_SYSTRAY_POLL_IDLE_SECS", "not-a-number");
+            std::env::set_var("TETRON_SYSTRAY_POLL_UNREACHABLE_SECS", "45");
+        }
+        let c = PollConfig::from_env();
+        assert_eq!(c.active, Duration::from_secs(3), "zero -> default");
+        assert_eq!(c.idle, Duration::from_secs(300), "garbage -> default");
+        assert_eq!(c.unreachable, Duration::from_secs(45), "valid override honored");
+        unsafe {
+            std::env::remove_var("TETRON_SYSTRAY_POLL_ACTIVE_SECS");
+            std::env::remove_var("TETRON_SYSTRAY_POLL_IDLE_SECS");
+            std::env::remove_var("TETRON_SYSTRAY_POLL_UNREACHABLE_SECS");
+        }
+    }
 }
