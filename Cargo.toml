@@ -1,6 +1,6 @@
 [package]
 name = "tetron-systray"
-version = "0.11.1"
+version = "0.14.0"
 edition = "2024"
 rust-version = "1.91"
 license = "MPL-2.0"
