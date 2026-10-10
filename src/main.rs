@@ -57,6 +57,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder, TrayIconEvent};
 
 mod ipc_client;
+mod launch;
 mod service;
 
 use clap::{Parser, Subcommand};
@@ -654,6 +655,12 @@ fn build_menu_and_state(
         menu.append(&MenuItem::with_id("standby_all", "Standby all", true, None))?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&MenuItem::with_id("open_webui", "Open webui", true, None))?;
+        // Only offer the tui launcher when tetron-tui is installed. Decided when
+        // the menu is built, so installing it later shows up after the next
+        // rebuild (a restart of the tray, or a change in the set of networks).
+        if launch::tui_path().is_some() {
+            menu.append(&MenuItem::with_id("open_tui", "Open tui", true, None))?;
+        }
         menu.append(&PredefinedMenuItem::separator())?;
     }
 
@@ -690,6 +697,8 @@ fn handle_click(id: &str) {
         copy_to_clipboard(ip);
     } else if id == "open_webui" {
         open_webui();
+    } else if id == "open_tui" {
+        launch::open_tui();
     }
 }
 
