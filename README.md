@@ -59,6 +59,12 @@ Override the port by setting the `TETRON_WEBUI_PORT` environment variable
 tetron-systray install --port 8080
 ```
 
+### Opening tetron-tui
+
+When [`tetron-tui`](https://github.com/ErikAllanKincaid/tetron-tui) is installed, the menu also shows an "Open tui" item next to "Open webui". `tetron-tui` is a full-screen terminal program, so the item starts a terminal emulator running it. On Linux the first of these found is used: `x-terminal-emulator` (your configured default), `gnome-terminal`, `konsole`, `xfce4-terminal`, `kitty`, `alacritty`, `xterm`. On macOS it opens Terminal.app.
+
+To use a different terminal, set `TETRON_TUI_TERMINAL` to the command that precedes the program to run, for example `TETRON_TUI_TERMINAL="alacritty -e"`. The service does not read your shell profile, so set it where the service can see it (for example `systemctl --user edit tetron-systray` and add `Environment=TETRON_TUI_TERMINAL=...`). The item appears only if `tetron-tui` is found on `PATH`, `/usr/local/bin` or `~/.local/bin` when the menu is built, so after installing it restart the tray (`systemctl --user restart tetron-systray`). If the item does nothing, the reason is logged: `journalctl --user -u tetron-systray`.
+
 If both webui and systray are installed as services, pass the same `--port`
 to each `install` command so both service units carry the variable. If you
 run either from a terminal, the variable is inherited from the shell
