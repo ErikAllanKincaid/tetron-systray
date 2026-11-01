@@ -24,7 +24,16 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Running it
 
-**Primary path: download a pre-built binary directly, no Rust toolchain needed.**
+**Debian and Ubuntu (amd64, arm64):** download `tetron-systray_<version>_<arch>.deb` from the [releases page](https://github.com/ErikAllanKincaid/tetron-systray/releases/latest) and install it with apt, which puts the binary in `/usr/bin`, pulls in the GTK and appindicator libraries it needs, and lets apt upgrade and remove it; then register the service as your user:
+
+```bash
+sudo apt install ./tetron-systray_<version>_amd64.deb
+tetron-systray install
+```
+
+The [tetron suite installer](https://github.com/ErikAllanKincaid/tetron) uses the `.deb` on Debian and Ubuntu automatically. To remove it: `tetron-systray uninstall`, then `sudo apt remove tetron-systray`.
+
+**Other systems: download a pre-built binary directly, no Rust toolchain needed.**
 
 ```bash
 # First install tetron daemon if it is not yet installed.
