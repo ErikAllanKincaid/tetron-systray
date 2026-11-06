@@ -8,7 +8,7 @@ claim below points at either a real file in this repo or a real external
 doc/source, so you can go verify or copy directly.
 
 Companion piece: [`tetron-webui`'s own
-HOWTO](https://github.com/ErikAllanKincaid/tetron-webui/blob/main/docs/HOWTO_Build_A_WebUI.md)
+HOWTO](https://github.com/tetronos/tetron-webui/blob/main/docs/HOWTO_Build_A_WebUI.md)
 covers the same daemon from a browser-dashboard angle instead — the IPC
 client pattern and per-user-service deployment sections overlap heavily
 with this one; read whichever matches what you're building, or both if
@@ -30,7 +30,7 @@ If a CLI already talks to your daemon over some IPC channel, don't
 reimplement that wire format in the tray app. Pull the message enum and
 framing code into a shared library crate both depend on.
 
-- Real example: [`tetron-proto`](https://github.com/ErikAllanKincaid/tetron/tree/main/tetron-proto) —
+- Real example: [`tetron-proto`](https://github.com/tetronos/tetron/tree/main/tetron-proto) —
   the `IpcMessage` enum, length-prefixed msgpack framing, `connect()`/
   `send()`/`recv()` helpers over a Unix socket.
 - As a git dependency floating on the daemon's main branch (not a pinned

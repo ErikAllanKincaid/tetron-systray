@@ -2,9 +2,9 @@
 
 ![tetron-systray logo](images/tetron-systray.png)
 
-A menu-bar/tray status + quick-action client for [tetron](https://github.com/ErikAllanKincaid/tetron), a P2P mesh VPN. Talks to the existing `tetron` daemon over its Unix-socket IPC protocol — no daemon changes required.
+A menu-bar/tray status + quick-action client for [tetron](https://github.com/tetronos/tetron), a P2P mesh VPN. Talks to the existing `tetron` daemon over its Unix-socket IPC protocol — no daemon changes required.
 
-**Optional and separate from tetron on purpose**, same as [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui): tetron itself stays CLI-only by default; this is a genuinely separate, opt-in product for anyone who wants glanceable menu-bar status instead of (or alongside) the browser dashboard. Nothing about tetron's own behavior changes whether this exists or not.
+**Optional and separate from tetron on purpose**, same as [`tetron-webui`](https://github.com/tetronos/tetron-webui): tetron itself stays CLI-only by default; this is a genuinely separate, opt-in product for anyone who wants glanceable menu-bar status instead of (or alongside) the browser dashboard. Nothing about tetron's own behavior changes whether this exists or not.
 
 **Not a network picker.** Unlike Tailscale's tray (whose main job is choosing *which one* tailnet you're on), tetron can be joined to several networks simultaneously, each independently toggleable — so this tray is a status dashboard with a per-network toggle, not a switcher.
 
@@ -24,36 +24,36 @@ A menu-bar/tray status + quick-action client for [tetron](https://github.com/Eri
 
 ## Running it
 
-**Debian and Ubuntu (amd64, arm64):** download `tetron-systray_<version>_<arch>.deb` from the [releases page](https://github.com/ErikAllanKincaid/tetron-systray/releases/latest) and install it with apt, which puts the binary in `/usr/bin`, pulls in the GTK and appindicator libraries it needs, and lets apt upgrade and remove it; then register the service as your user:
+**Debian and Ubuntu (amd64, arm64):** download `tetron-systray_<version>_<arch>.deb` from the [releases page](https://github.com/tetronos/tetron-systray/releases/latest) and install it with apt, which puts the binary in `/usr/bin`, pulls in the GTK and appindicator libraries it needs, and lets apt upgrade and remove it; then register the service as your user:
 
 ```bash
 sudo apt install ./tetron-systray_<version>_amd64.deb
 tetron-systray install
 ```
 
-The [tetron suite installer](https://github.com/ErikAllanKincaid/tetron) uses the `.deb` on Debian and Ubuntu automatically. To remove it: `tetron-systray uninstall`, then `sudo apt remove tetron-systray`.
+The [tetron suite installer](https://github.com/tetronos/tetron) uses the `.deb` on Debian and Ubuntu automatically. To remove it: `tetron-systray uninstall`, then `sudo apt remove tetron-systray`.
 
 **Other systems: download a pre-built binary directly, no Rust toolchain needed.**
 
 ```bash
 # First install tetron daemon if it is not yet installed.
-curl -Lo tetron https://github.com/ErikAllanKincaid/tetron/releases/latest/download/tetron-linux-x86_64
+curl -Lo tetron https://github.com/tetronos/tetron/releases/latest/download/tetron-linux-x86_64
 chmod +x tetron
 sudo install tetron /usr/local/bin/tetron
 sudo tetron install
 
 # Linux x86_64, see the releases page for aarch64 / macOS binaries:
-# https://github.com/ErikAllanKincaid/tetron-systray/releases/latest
-curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
+# https://github.com/tetronos/tetron-systray/releases/latest
+curl -Lo tetron-systray https://github.com/tetronos/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
 chmod +x tetron-systray
 sudo install tetron-systray /usr/local/bin/tetron-systray
 
 tetron-systray install     # sets up + starts a per-user service, no sudo needed
 ```
 
-Or install/upgrade tetron, tetron-webui, and tetron-systray together with [`contrib/install-tetron-suite.sh`](https://github.com/ErikAllanKincaid/tetron/blob/main/contrib/install-tetron-suite.sh) from the tetron repo — it's an extra, helpful wrapper around the same steps above, not a replacement for them.
+Or install/upgrade tetron, tetron-webui, and tetron-systray together with [`contrib/install-tetron-suite.sh`](https://github.com/tetronos/tetron/blob/main/contrib/install-tetron-suite.sh) from the tetron repo — it's an extra, helpful wrapper around the same steps above, not a replacement for them.
 
-**Via [`tetron-webui`](https://github.com/ErikAllanKincaid/tetron-webui)'s Add-ons panel:** once webui is running, its Add-ons panel shows whether systray is installed and can uninstall it, but can't install it directly — `tetron-systray` installs to root-owned `/usr/local/bin`, same as `tetron`/`tetron-webui`, and webui runs unprivileged. Clicking Install there shows the `install-tetron-suite.sh` command above to run yourself.
+**Via [`tetron-webui`](https://github.com/tetronos/tetron-webui)'s Add-ons panel:** once webui is running, its Add-ons panel shows whether systray is installed and can uninstall it, but can't install it directly — `tetron-systray` installs to root-owned `/usr/local/bin`, same as `tetron`/`tetron-webui`, and webui runs unprivileged. Clicking Install there shows the `install-tetron-suite.sh` command above to run yourself.
 
 Installs a `systemd --user` unit on Linux, or a launchd **LaunchAgent** on macOS — no root needed either way, runs inside your login session (distinct from `tetron`'s own system-wide daemon service). **Auto-starts across Cinnamon, GNOME, XFCE, and KDE**: the unit lists both `WantedBy=default.target` and `graphical-session.target`, since GNOME/KDE activate the latter properly but Cinnamon/XFCE never do (found live testing on a real Cinnamon desktop — see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md) for the full story). On macOS, `install` wraps the binary in a minimal `~/Applications/TetronSystray.app` bundle (a real `CFBundleIdentifier`/`LSUIElement` are required for the status item to appear in the menu bar at all -- a bare binary does not work) and drains `NSApplication`'s own event queue each tick so clicks actually open the menu, not just a bare Cocoa run-loop pump (see [`docs/HOWTO_Build_A_Systray.md`](docs/HOWTO_Build_A_Systray.md)'s "Event loop" section for the full story).
 
@@ -70,7 +70,7 @@ tetron-systray install --port 8080
 
 ### Opening tetron-tui
 
-When [`tetron-tui`](https://github.com/ErikAllanKincaid/tetron-tui) is installed, the menu also shows an "Open tui" item next to "Open webui". `tetron-tui` is a full-screen terminal program, so the item starts a terminal emulator running it. On Linux the first of these found is used: `x-terminal-emulator` (your configured default), `gnome-terminal`, `konsole`, `xfce4-terminal`, `kitty`, `alacritty`, `xterm`. On macOS it opens Terminal.app.
+When [`tetron-tui`](https://github.com/tetronos/tetron-tui) is installed, the menu also shows an "Open tui" item next to "Open webui". `tetron-tui` is a full-screen terminal program, so the item starts a terminal emulator running it. On Linux the first of these found is used: `x-terminal-emulator` (your configured default), `gnome-terminal`, `konsole`, `xfce4-terminal`, `kitty`, `alacritty`, `xterm`. On macOS it opens Terminal.app.
 
 To use a different terminal, set `TETRON_TUI_TERMINAL` to the command that precedes the program to run, for example `TETRON_TUI_TERMINAL="alacritty -e"`. The service does not read your shell profile, so set it where the service can see it (for example `systemctl --user edit tetron-systray` and add `Environment=TETRON_TUI_TERMINAL=...`). The item appears only if `tetron-tui` is found on `PATH`, `/usr/local/bin` or `~/.local/bin` when the menu is built, so after installing it restart the tray (`systemctl --user restart tetron-systray`). If the item does nothing, the reason is logged: `journalctl --user -u tetron-systray`.
 
@@ -120,7 +120,7 @@ Only needed if you're changing the code, or a pre-built binary isn't published f
 Re-run the same install steps with a fresh binary (or the `install-tetron-suite.sh` one-liner, which only touches what's behind):
 
 ```bash
-curl -Lo tetron-systray https://github.com/ErikAllanKincaid/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
+curl -Lo tetron-systray https://github.com/tetronos/tetron-systray/releases/latest/download/tetron-systray-linux-x86_64
 chmod +x tetron-systray
 sudo install tetron-systray /usr/local/bin/tetron-systray   # overwrite the old binary at the same path
 tetron-systray install                                        # re-registers the service and restarts it on the new binary
