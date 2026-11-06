@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.91"
 license = "MPL-2.0"
 description = "Menu-bar/systray status + quick actions for tetron, over the daemon IPC socket"
-repository = "https://github.com/ErikAllanKincaid/tetron-systray"
+repository = "https://github.com/tetronos/tetron-systray"
 
 [[bin]]
 name = "tetron-systray"
@@ -16,7 +16,7 @@ path = "src/main.rs"
 # tetron-webui's own Cargo.toml comment: the real compatibility risk is
 # which *binaries* are running together, and tetron-proto's wire types
 # already use #[serde(default)] consistently for exactly that reason.
-tetron-proto = { git = "https://github.com/ErikAllanKincaid/tetron" }
+tetron-proto = { git = "https://github.com/tetronos/tetron" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 anyhow = "1"
 # Tray icon + native menu. Re-exports muda for menu construction, so no
