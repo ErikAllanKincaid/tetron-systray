@@ -23,7 +23,7 @@ recommends = ["tetron (>= {minor}), tetron (<< {next_minor})"]
 # The old package names resolve on Debian 13 and Ubuntu 24.04 too, where the
 # renamed t64 packages provide them.
 depends = ["libayatana-appindicator3-1 | libappindicator3-1"]
-soname_map = { "libxdo.so.3" = "libxdo3", "libgtk-3.so.0" = "libgtk-3-0", "libgdk-3.so.0" = "libgtk-3-0", "libgdk_pixbuf-2.0.so.0" = "libgdk-pixbuf-2.0-0", "libgio-2.0.so.0" = "libglib2.0-0", "libgobject-2.0.so.0" = "libglib2.0-0", "libglib-2.0.so.0" = "libglib2.0-0" }
+soname_map = { "libxdo.so.3" = "libxdo3", "libgtk-3.so.0" = "libgtk-3-0", "libgdk-3.so.0" = "libgtk-3-0", "libgdk_pixbuf-2.0.so.0" = "libgdk-pixbuf-2.0-0", "libgio-2.0.so.0" = "libglib2.0-0", "libgobject-2.0.so.0" = "libglib2.0-0", "libglib-2.0.so.0" = "libglib2.0-0", "libpango-1.0.so.0" = "libpango-1.0-0", "libcairo.so.2" = "libcairo2", "libcairo-gobject.so.2" = "libcairo-gobject2" }
 smoke = "tetron-systray --version"
 
 [[files]]
